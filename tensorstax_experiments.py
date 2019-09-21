@@ -7,8 +7,10 @@ import glob
 # this would be so cool, but not supported in windows, and deprecated anyway...
 #import tensorflow.contrib.ffmpeg
 
-# hmm, isn't there some way to not specify it?
-data_path = os.path.join('data', 'saturn_bright_mvi_6902')
+
+#data_path = os.path.join('data', 'saturn_bright_mvi_6902')
+data_path = os.path.join('data', 'jupiter_mvi_6906')
+
 file_glob = os.path.join(data_path, '????????.png')
 
 #observed_image_int = tf.image.decode_image(observed_image_bytes, channels = num_channels)
@@ -88,29 +90,38 @@ def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True):
     #print(ret)
     return ret
 
-def center_image(image, pad = 0):
-    spatial_dims = get_spatial_dims()
-    
+def pad_image(image, pad):
     if pad is not 0:
         paddings = tf.constant([[pad, pad], [pad, pad], [0, 0]])
         image = tf.pad(image, paddings)
+    return image
+
+def center_image(image, pad = 0):
+    image = pad_image(image, pad)
+    
+    spatial_dims = get_spatial_dims()    
 
     com = center_of_mass(image)
-
-    shift = tf.squeeze(com)
+    
+    shift = tf.squeeze(com, axis = -1)    
     shift = tf.cast(shift, tf.int32)
     shift = shift * -1
-    print("shift:", shift)
+    #print("shift:", shift)
     image = tf.roll(image, shift = shift, axis = spatial_dims)
 
     return image
 
-    
-    
-        
-        
 
+def center_image_per_channel(image, pad = 0):
+    channel_images = tf.split(image, image.shape[-1], axis = -1)
+    
+    centered_channel_images = []
+    for channel_image in channel_images:
+        centered_channel_image = center_image(channel_image, pad)
+        centered_channel_images.append(centered_channel_image)
 
+    centered_channel_images = tf.concat(centered_channel_images, axis = -1)
+    return centered_channel_images
 
 estimated_image_sum = None
 num_images = 0
@@ -118,7 +129,7 @@ for filename in glob.glob(file_glob):
     num_images += 1
     observed_image = read_image(filename)
 
-    observed_image = center_image(observed_image)
+    observed_image = center_image_per_channel(observed_image)
 
 
     if estimated_image_sum is None:
@@ -130,7 +141,7 @@ for filename in glob.glob(file_glob):
                 
 estimated_image = estimated_image_sum / num_images
 
-print(estimated_image.dtype)
+estimated_image = center_image_per_channel(estimated_image)
 
 write_image(estimated_image, os.path.join(data_path, 'sum.png'))
 print("Cool");
