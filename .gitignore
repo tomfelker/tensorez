@@ -1,0 +1,9 @@
+data/**/*.png
+data/**/*.mov
+data/**/*.avi
+data/**/*.gif
+data/**/*.jpg
+data/**/*.jpeg
+obd/**
+*.zip
+*.pdf
