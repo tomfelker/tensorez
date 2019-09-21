@@ -11,7 +11,10 @@ import glob
 psf_size = 32
 
 psf_training_rate = .1
-psf_training_steps = 1000
+psf_training_steps = 100
+
+estimate_training_rate = .01
+estimate_training_steps = 2
 
 
 #data_path = os.path.join('data', 'saturn_bright_mvi_6902')
@@ -141,7 +144,7 @@ for filename in glob.glob(file_glob):
 
     # Fancier stuff:
     if estimated_image is None:
-        estimated_image = observed_image        
+        estimated_image = tf.Variable(observed_image)
 
     # width, height, in_channels, out_channels
     # and in_channels is not what we want... hmm, is that correct?  experimentally yes
@@ -162,15 +165,15 @@ for filename in glob.glob(file_glob):
         psf_guess = tf.ones(psf_shape)
         psf_guess *= (2.0 / (psf_size * psf_size))
 
-    # does it need to be a var?
     psf_guess = tf.Variable(psf_guess)
 
     # should be ones
     #print("psf_guess sum:", tf.reduce_sum(psf_guess, axis = (0, 1)))
 
-    optimizer = tf.train.AdamOptimizer(psf_training_rate)
+    #okay, first, learning the PSF for this observed image:
+    psf_optimizer = tf.train.AdamOptimizer(psf_training_rate)
     for train_step in range(0, psf_training_steps):
-        print("Training step", train_step)
+
 
         #predicted_observed_image = tf.nn.conv2d(estimated_image, psf_guess, padding = 'SAME')
         #def loss():
@@ -182,11 +185,11 @@ for filename in glob.glob(file_glob):
             predicted_observed_image = tf.nn.conv2d(estimated_image, psf_guess, padding = 'SAME')
             ## hmm, this seems deprecated, but what is the replacement?  I could write it myself, but why?
             loss = tf.losses.mean_squared_error(observed_image, predicted_observed_image)
-            print("Loss:", loss.numpy())
+            print("PSF Training step", train_step, "Loss:", loss.numpy())
         # don't really need to be this manual, could use optimizer.compute_gradients
         d_psf_guess_d_loss = tape.gradient(loss, psf_guess)
         #print("d_psf_guess_d_loss:", d_psf_guess_d_loss)
-        optimizer.apply_gradients([(d_psf_guess_d_loss, psf_guess)])
+        psf_optimizer.apply_gradients([(d_psf_guess_d_loss, psf_guess)])
         tf.assign(psf_guess, tf.math.maximum(psf_guess, 0))
         #psf_guess = tf.(psf_guess, 0)
         #hmm, constrain positivity?
@@ -197,7 +200,28 @@ for filename in glob.glob(file_glob):
     write_image(tf.squeeze(predicted_observed_image), "predicted_observed_image.png")
     write_image(tf.squeeze(psf_guess) / tf.reduce_max(psf_guess), "psf_guess.png")
 
-    break
+    # and now update the estimate
+    # hmm, this is basically copypasta of the above
+    estimate_optimizer = tf.train.AdamOptimizer(estimate_training_rate)
+    for train_step in range(0, estimate_training_steps):
+        with tf.GradientTape() as tape:
+            tape.watch(estimated_image)
+            predicted_observed_image = tf.nn.conv2d(estimated_image, psf_guess, padding = 'SAME')
+            ## hmm, this seems deprecated, but what is the replacement?  I could write it myself, but why?
+            loss = tf.losses.mean_squared_error(observed_image, predicted_observed_image)
+            print("Estimated image training step", train_step, "Loss:", loss.numpy())
+        # don't really need to be this manual, could use optimizer.compute_gradients
+        d_estimated_image_d_loss = tape.gradient(loss, estimated_image)
+        #print("d_psf_guess_d_loss:", d_psf_guess_d_loss)
+        estimate_optimizer.apply_gradients([(d_estimated_image_d_loss, estimated_image)])
+        tf.assign(estimated_image, tf.math.maximum(estimated_image, 0))
+        #psf_guess = tf.(psf_guess, 0)
+        #hmm, constrain positivity?
+        # above doesn't work...
+        
+    write_image(tf.squeeze(estimated_image/tf.reduce_max(estimated_image)), "estimated_image.png")
+
+    #break
                 
 estimated_image_avg = estimated_image_sum / num_images
 estimated_image_avg = tf.squeeze(estimated_image_avg)
