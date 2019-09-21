@@ -8,20 +8,17 @@ import glob
 #import tensorflow.contrib.ffmpeg
 
 
+psf_size = 32
+
+psf_training_rate = .1
+psf_training_steps = 1000
+
+
 #data_path = os.path.join('data', 'saturn_bright_mvi_6902')
-data_path = os.path.join('data', 'jupiter_mvi_6906')
+#data_path = os.path.join('data', 'jupiter_mvi_6906')
+data_path = os.path.join('obd', 'data','epsilon_lyrae')
 
 file_glob = os.path.join(data_path, '????????.png')
-
-#observed_image_int = tf.image.decode_image(observed_image_bytes, channels = num_channels)
-#observed_image = tfg.image.color_space.srgb.to_linear(observed_image_int)
-
-#estimated_image_sum = tf.Variable(tf.zeros(shape = (image_width, image_height, num_channels)))
-
-#next_estimated_image_sum = tf.add(estimated_image_sum, observed_image)
-
-#update_op = tf.assign(estimated_image_sum, next_estimated_image_sum)
-
 
 tf.enable_eager_execution()
 
@@ -123,27 +120,90 @@ def center_image_per_channel(image, pad = 0):
     centered_channel_images = tf.concat(centered_channel_images, axis = -1)
     return centered_channel_images
 
+estimated_image = None
 estimated_image_sum = None
 num_images = 0
-for filename in glob.glob(file_glob):
-    num_images += 1
+for filename in glob.glob(file_glob):    
     observed_image = read_image(filename)
 
-    observed_image = center_image_per_channel(observed_image)
+    observed_image = center_image(observed_image)
 
+    # conv2d requires a batch dimension on our images...
+    observed_image = tf.expand_dims(observed_image, axis = 0)
 
+    # Simple summation of the shifted images, as a control:
+    num_images += 1
     if estimated_image_sum is None:
         estimated_image_sum = observed_image
     else:
         estimated_image_sum += observed_image    
 
-    #break
+
+    # Fancier stuff:
+    if estimated_image is None:
+        estimated_image = observed_image        
+
+    # width, height, in_channels, out_channels
+    # and in_channels is not what we want... hmm, is that correct?  experimentally yes
+    psf_shape = [psf_size, psf_size, 1, observed_image.shape[-1]]
+    
+    psf_test = False
+    if psf_test:
+        # width, height, in_channels, out_channels
+        # and in_channels is not what we want... hmm, is that correct?  experimentally yes
+        psf_guess = np.zeros(psf_shape)
+        psf_guess[           0,            0, 0, 0] = 1
+        psf_guess[           0, psf_size - 1, 0, 1] = 1
+        psf_guess[psf_size - 1,            0, 0, 2] = 1
+        psf_guess = tf.cast(psf_guess, tf.float32)
+    else:
+        
+        #psf_guess = tf.random.uniform(psf_shape)
+        psf_guess = tf.ones(psf_shape)
+        psf_guess *= (2.0 / (psf_size * psf_size))
+
+    # does it need to be a var?
+    psf_guess = tf.Variable(psf_guess)
+
+    # should be ones
+    #print("psf_guess sum:", tf.reduce_sum(psf_guess, axis = (0, 1)))
+
+    optimizer = tf.train.AdamOptimizer(psf_training_rate)
+    for train_step in range(0, psf_training_steps):
+        print("Training step", train_step)
+
+        #predicted_observed_image = tf.nn.conv2d(estimated_image, psf_guess, padding = 'SAME')
+        #def loss():
+        #    # hmm, this seems deprecated, but what is the replacement?  I could write it myself, but why?
+        #    return tf.losses.mean_squared_error(observed_image, predicted_observed_image)
+        
+        with tf.GradientTape() as tape:
+            tape.watch(psf_guess)
+            predicted_observed_image = tf.nn.conv2d(estimated_image, psf_guess, padding = 'SAME')
+            ## hmm, this seems deprecated, but what is the replacement?  I could write it myself, but why?
+            loss = tf.losses.mean_squared_error(observed_image, predicted_observed_image)
+            print("Loss:", loss.numpy())
+        # don't really need to be this manual, could use optimizer.compute_gradients
+        d_psf_guess_d_loss = tape.gradient(loss, psf_guess)
+        #print("d_psf_guess_d_loss:", d_psf_guess_d_loss)
+        optimizer.apply_gradients([(d_psf_guess_d_loss, psf_guess)])
+        tf.assign(psf_guess, tf.math.maximum(psf_guess, 0))
+        #psf_guess = tf.(psf_guess, 0)
+        #hmm, constrain positivity?
+        # above doesn't work...
+
+        #optimizer.minimize(loss, var_list=[psf_guess])
+
+    write_image(tf.squeeze(predicted_observed_image), "predicted_observed_image.png")
+    write_image(tf.squeeze(psf_guess) / tf.reduce_max(psf_guess), "psf_guess.png")
+
+    break
                 
-estimated_image = estimated_image_sum / num_images
+estimated_image_avg = estimated_image_sum / num_images
+estimated_image_avg = tf.squeeze(estimated_image_avg)
+estimated_image_avg = center_image_per_channel(estimated_image_avg)
 
-estimated_image = center_image_per_channel(estimated_image)
-
-write_image(estimated_image, os.path.join(data_path, 'sum.png'))
+write_image(estimated_image_avg, os.path.join(data_path, 'avg.png'))
 print("Cool");
 
     
