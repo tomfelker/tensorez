@@ -5,5 +5,7 @@ data/**/*.gif
 data/**/*.jpg
 data/**/*.jpeg
 obd/**
+output/*
+__pycache__/*
 *.zip
 *.pdf
