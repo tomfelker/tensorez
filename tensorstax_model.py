@@ -40,8 +40,11 @@ class TensorstaxModel(tf.keras.Model):
 
     def default_point_spread_functions(self):
         psfs_shape = (self.batch_size, self.psf_size, self.psf_size, 1, self.channels)
-        psfs = tf.random.uniform(psfs_shape)
-        psfs = psfs / tf.reduce_sum(psfs, axis = (-4, -3), keepdims = True)
+        
+        #psfs = tf.random.uniform(psfs_shape)
+        #psfs = psfs / tf.reduce_sum(psfs, axis = (-4, -3), keepdims = True)
+
+        psfs = tf.zeros(psfs_shape)
         return psfs
 
 
