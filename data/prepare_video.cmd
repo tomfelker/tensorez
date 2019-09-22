@@ -23,7 +23,7 @@ set filename=saturn_bright_mvi_6902.mov
 set  dirname=saturn_bright_mvi_6902
 set center_x=995
 set center_y=570
-set numframes=100
+set numframes=1000
 
 mkdir %dirname%
 %ffmpeg% -i %filename% -frames:v %numframes% -filter:v "crop=%size%:%size%:%center_x%-%size%/2:%center_y%-%size%/2" %dirname%\%%08d.png

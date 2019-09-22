@@ -8,14 +8,15 @@ import glob
 #import tensorflow.contrib.ffmpeg
 
 
-psf_size = 32
+psf_size = 64
 
-psf_training_rate = .1
+psf_training_rate = .01
 psf_training_steps = 100
 
-estimate_training_rate = .01
-estimate_training_steps = 2
+estimate_training_rate = .1
+estimate_training_steps = 100
 
+estimate_update_rate = .1
 
 #data_path = os.path.join('data', 'saturn_bright_mvi_6902')
 #data_path = os.path.join('data', 'jupiter_mvi_6906')
@@ -102,9 +103,13 @@ def center_image(image, pad = 0):
     spatial_dims = get_spatial_dims()    
 
     com = center_of_mass(image)
-    
+
     shift = tf.squeeze(com, axis = -1)    
     shift = tf.cast(shift, tf.int32)
+
+    #theory - only shifting by multiples of 2 may help avoid artifacts do to sensor debayering
+    shift = tf.bitwise.bitwise_and(shift, -2)
+    
     shift = shift * -1
     #print("shift:", shift)
     image = tf.roll(image, shift = shift, axis = spatial_dims)
@@ -123,7 +128,11 @@ def center_image_per_channel(image, pad = 0):
     centered_channel_images = tf.concat(centered_channel_images, axis = -1)
     return centered_channel_images
 
-estimated_image = None
+
+
+#ema means exponential moving average
+estimated_image_ema = None
+#estimated_sensor_bias_image = None
 estimated_image_sum = None
 num_images = 0
 for filename in glob.glob(file_glob):    
@@ -141,10 +150,16 @@ for filename in glob.glob(file_glob):
     else:
         estimated_image_sum += observed_image    
 
-
     # Fancier stuff:
-    if estimated_image is None:
-        estimated_image = tf.Variable(observed_image)
+    if estimated_image_ema is None:
+        estimated_image_ema = tf.Variable(observed_image)
+
+    #if estimated_sensor_bias_image is None:
+    #    estimated_sensor_bias_image = tf.Variable(tf.zeros_like(observed_image))
+
+    
+    #observed_image -= estimated_sensor_bias_image
+    
 
     # width, height, in_channels, out_channels
     # and in_channels is not what we want... hmm, is that correct?  experimentally yes
@@ -161,8 +176,8 @@ for filename in glob.glob(file_glob):
         psf_guess = tf.cast(psf_guess, tf.float32)
     else:
         
-        #psf_guess = tf.random.uniform(psf_shape)
-        psf_guess = tf.ones(psf_shape)
+        psf_guess = tf.random.uniform(psf_shape)
+        #psf_guess = tf.ones(psf_shape)
         psf_guess *= (2.0 / (psf_size * psf_size))
 
     psf_guess = tf.Variable(psf_guess)
@@ -182,7 +197,7 @@ for filename in glob.glob(file_glob):
         
         with tf.GradientTape() as tape:
             tape.watch(psf_guess)
-            predicted_observed_image = tf.nn.conv2d(estimated_image, psf_guess, padding = 'SAME')
+            predicted_observed_image = tf.nn.conv2d(estimated_image_ema, psf_guess, padding = 'SAME')
             ## hmm, this seems deprecated, but what is the replacement?  I could write it myself, but why?
             loss = tf.losses.mean_squared_error(observed_image, predicted_observed_image)
             print("PSF Training step", train_step, "Loss:", loss.numpy())
@@ -190,37 +205,54 @@ for filename in glob.glob(file_glob):
         d_psf_guess_d_loss = tape.gradient(loss, psf_guess)
         #print("d_psf_guess_d_loss:", d_psf_guess_d_loss)
         psf_optimizer.apply_gradients([(d_psf_guess_d_loss, psf_guess)])
-        tf.assign(psf_guess, tf.math.maximum(psf_guess, 0))
+        tf.assign(psf_guess, tf.math.maximum(psf_guess, 0))        
         #psf_guess = tf.(psf_guess, 0)
         #hmm, constrain positivity?
         # above doesn't work...
 
         #optimizer.minimize(loss, var_list=[psf_guess])
 
+    # normalize psf
+    # though, for some reason, doing it in above loop makes it fail to converge...
+    tf.assign(psf_guess, psf_guess / tf.reduce_sum(psf_guess))
+
     write_image(tf.squeeze(predicted_observed_image), "predicted_observed_image.png")
     write_image(tf.squeeze(psf_guess) / tf.reduce_max(psf_guess), "psf_guess.png")
 
     # and now update the estimate
     # hmm, this is basically copypasta of the above
+
+    estimated_image = tf.Variable(estimated_image_ema)
+    
     estimate_optimizer = tf.train.AdamOptimizer(estimate_training_rate)
     for train_step in range(0, estimate_training_steps):
-        with tf.GradientTape() as tape:
+        with tf.GradientTape(persistent = True) as tape:
             tape.watch(estimated_image)
+            #tape.watch(estimated_sensor_bias_image)
             predicted_observed_image = tf.nn.conv2d(estimated_image, psf_guess, padding = 'SAME')
             ## hmm, this seems deprecated, but what is the replacement?  I could write it myself, but why?
             loss = tf.losses.mean_squared_error(observed_image, predicted_observed_image)
             print("Estimated image training step", train_step, "Loss:", loss.numpy())
         # don't really need to be this manual, could use optimizer.compute_gradients
         d_estimated_image_d_loss = tape.gradient(loss, estimated_image)
+        #d_estimated_sensor_bias_image_d_loss = tape.gradient(loss, estimated_sensor_bias_image)
+        del tape
         #print("d_psf_guess_d_loss:", d_psf_guess_d_loss)
-        estimate_optimizer.apply_gradients([(d_estimated_image_d_loss, estimated_image)])
+        estimate_optimizer.apply_gradients([
+            (d_estimated_image_d_loss, estimated_image),
+            #(d_estimated_sensor_bias_image_d_loss, estimated_sensor_bias_image)
+            ])
         tf.assign(estimated_image, tf.math.maximum(estimated_image, 0))
         #psf_guess = tf.(psf_guess, 0)
         #hmm, constrain positivity?
         # above doesn't work...
-        
-    write_image(tf.squeeze(estimated_image/tf.reduce_max(estimated_image)), "estimated_image.png")
 
+    tf.assign(estimated_image_ema, estimated_image_ema * (1 - estimate_update_rate) + estimated_image * estimate_update_rate)
+     
+    write_image(tf.squeeze(estimated_image/tf.reduce_max(estimated_image)), "estimated_image.png")
+    write_image(tf.squeeze(estimated_image_ema/tf.reduce_max(estimated_image_ema)), "estimated_image_ema.png")
+    write_image(center_image_per_channel(tf.squeeze(estimated_image/tf.reduce_max(estimated_image))), "estimated_image_centered.png")
+    #write_image(tf.squeeze(estimated_sensor_bias_image/tf.reduce_max(estimated_sensor_bias_image)), "estimated_sensor_bias_image.png")
     #break
                 
 estimated_image_avg = estimated_image_sum / num_images
