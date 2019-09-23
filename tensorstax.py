@@ -17,8 +17,8 @@ image_learning_rate = .001
 
 overall_training_steps = 100
 
-data_path = os.path.join('data', 'saturn_bright_mvi_6902')
-#data_path = os.path.join('data', 'jupiter_mvi_6906')
+#data_path = os.path.join('data', 'saturn_bright_mvi_6902')
+data_path = os.path.join('data', 'jupiter_mvi_6906')
 #data_path = os.path.join('obd', 'data','epsilon_lyrae')
 
 file_glob = os.path.join(data_path, '????????.png')
@@ -38,6 +38,7 @@ for filename in glob.glob(file_glob):
     if num_images == batch_size:
         break
 images = tf.stack(images, axis = 0)
+
 
 print("Instantiating model.")
 model = TensorstaxModel(psf_size = psf_size)
@@ -69,6 +70,13 @@ for overall_training_step in range(0, overall_training_steps):
         # hmm, why doesn't this help?
         #tf.assign(model.point_spread_functions, model.point_spread_functions / tf.reduce_sum(model.point_spread_functions, axis = (-4, -3), keepdims = True))
 
+        psf_examples = model.get_psf_examples()
+        write_image(psf_examples, os.path.join(output_dir, "psf_examples_latest_{}.png".format(psf_training_step)))        
+
+    psf_examples = model.get_psf_examples()
+    write_image(psf_examples, os.path.join(output_dir, "psf_examples_latest.png"))
+    write_image(psf_examples, os.path.join(output_dir, "psf_examples_{}.png".format(overall_training_step)))
+
     for image_training_step in range(0, image_training_steps):
         with tf.GradientTape() as image_tape:
             model(images)
@@ -82,11 +90,14 @@ for overall_training_step in range(0, overall_training_steps):
         # apply physicality constraints, image must be positive
         tf.assign(model.estimated_image, tf.maximum(0, model.estimated_image))
 
-    write_image(model.estimated_image, os.path.join(output_dir, "estimated_image_latest.png"))
-    psf_example = model.point_spread_functions[0, :, :, 0, :]
-    psf_example = psf_example / tf.reduce_max(psf_example)
-    write_image(psf_example, os.path.join(output_dir, "psf_0_latest.png"))
-    write_image(model.estimated_image, os.path.join(output_dir, "estimated_image_{}.png".format(overall_training_step)))
+    estimated_image = model.estimated_image
+    write_image(estimated_image, os.path.join(output_dir, "estimated_image_latest.png"))    
+    write_image(estimated_image, os.path.join(output_dir, "estimated_image_{}.png".format(overall_training_step)))
+
+    estimated_image_centered = center_image_per_channel(estimated_image)
+    write_image(estimated_image_centered, os.path.join(output_dir, "estimated_image_centered_latest.png"))    
+    write_image(estimated_image_centered, os.path.join(output_dir, "estimated_image_centered_{}.png".format(overall_training_step)))    
+    
 
 print("Cool");
 

@@ -41,10 +41,11 @@ class TensorstaxModel(tf.keras.Model):
     def default_point_spread_functions(self):
         psfs_shape = (self.batch_size, self.psf_size, self.psf_size, 1, self.channels)
         
-        #psfs = tf.random.uniform(psfs_shape)
-        #psfs = psfs / tf.reduce_sum(psfs, axis = (-4, -3), keepdims = True)
+        psfs = tf.random.uniform(psfs_shape)
+        psfs = psfs / tf.reduce_sum(psfs, axis = (-4, -3, -1), keepdims = True)
 
-        psfs = tf.zeros(psfs_shape)
+        #psfs = tf.zeros(psfs_shape)
+        
         return psfs
 
 
@@ -66,4 +67,9 @@ class TensorstaxModel(tf.keras.Model):
         self.add_loss(tf.losses.mean_squared_error(observed_images, predicted_observed_images))
 
 
+    def get_psf_examples(self, num_examples = 5):
+        psf_examples = self.point_spread_functions[0:num_examples, :, :, 0, :]
+        psf_examples = psf_examples / tf.reduce_max(psf_examples, axis = (-3, -2, -1), keepdims = True)
+        psf_example = tf.reshape(psf_examples, (psf_examples.shape[-3] * psf_examples.shape[-4], psf_examples.shape[-2], psf_examples.shape[-1]))
+        return psf_example
 
