@@ -6,6 +6,7 @@ from tensorstax_util import *
 from tensorstax_model import *
 
 model_adc = True
+model_noise = True
 psf_size = 128
 batch_size = 40
 
@@ -17,8 +18,8 @@ image_learning_rate = .001
 
 overall_training_steps = 100
 
-#data_path = os.path.join('data', 'saturn_bright_mvi_6902')
-data_path = os.path.join('data', 'jupiter_mvi_6906')
+data_path = os.path.join('data', 'saturn_bright_mvi_6902')
+#data_path = os.path.join('data', 'jupiter_mvi_6906')
 #data_path = os.path.join('obd', 'data','epsilon_lyrae')
 
 file_glob = os.path.join(data_path, '????????.png')
@@ -41,7 +42,7 @@ images = tf.stack(images, axis = 0)
 
 
 print("Instantiating model.")
-model = TensorstaxModel(psf_size = psf_size, model_adc = model_adc)
+model = TensorstaxModel(psf_size = psf_size, model_adc = model_adc, model_noise = model_noise)
 
 print("Beginning training....")
 
@@ -69,9 +70,7 @@ for overall_training_step in range(0, overall_training_steps):
         psf_examples = model.get_psf_examples()
         write_image(psf_examples, os.path.join(output_dir, "psf_examples_latest_{}.png".format(psf_training_step)))        
 
-    psf_examples = model.get_psf_examples()
-    write_image(psf_examples, os.path.join(output_dir, "psf_examples_latest.png"))
-    write_image(psf_examples, os.path.join(output_dir, "psf_examples_{}.png".format(overall_training_step)))
+    write_sequential_image(model.get_psf_examples(), os.path.join(output_dir, "psf_examples"), overall_training_step)    
 
     for image_training_step in range(0, image_training_steps):
         with tf.GradientTape() as image_tape:
@@ -85,13 +84,14 @@ for overall_training_step in range(0, overall_training_steps):
         model.apply_image_physicality_constraints()
 
     estimated_image = model.estimated_image
-    write_image(estimated_image, os.path.join(output_dir, "estimated_image_latest.png"))    
-    write_image(estimated_image, os.path.join(output_dir, "estimated_image_{}.png".format(overall_training_step)))
+    write_sequential_image(model.estimated_image, os.path.join(output_dir, "estimated_image"), overall_training_step)
+    write_sequential_image(center_image_per_channel(estimated_image), os.path.join(output_dir, "estimated_image_centered"), overall_training_step)
 
-    estimated_image_centered = center_image_per_channel(estimated_image)
-    write_image(estimated_image_centered, os.path.join(output_dir, "estimated_image_centered_latest.png"))    
-    write_image(estimated_image_centered, os.path.join(output_dir, "estimated_image_centered_{}.png".format(overall_training_step)))
-
+    if model.model_noise:
+        write_sequential_image(model.noise_bias, os.path.join(output_dir, "noise_bias"), overall_training_step)
+        write_sequential_image(model.noise_scale, os.path.join(output_dir, "noise_scale"), overall_training_step)
+        write_sequential_image(model.noise_image_scale, os.path.join(output_dir, "noise_image_scale"), overall_training_step)
+    
     model.print_adc_stats()
     
 

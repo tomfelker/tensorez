@@ -20,6 +20,10 @@ def write_image(image, filename):
     image_bytes = tf.image.encode_png(image_srgb_int)
     tf.io.write_file(filename, image_bytes)
 
+def write_sequential_image(image, basename, sequence_num):
+    write_image(image, basename + "_latest.png")
+    write_image(image, basename + "_{:08d}.png".format(sequence_num))
+
 # return an array of which dimensions are x, y, etc., with channels being -1st dim
 def get_spatial_dims(num_spatial_dims = 2):
     spatial_dims = []

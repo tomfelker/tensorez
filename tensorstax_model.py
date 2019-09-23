@@ -24,10 +24,11 @@ from tensorstax_util import *
 class TensorstaxModel(tf.keras.Model):
 
 
-    def __init__(self, psf_size = 32, model_adc = True):
+    def __init__(self, psf_size = 32, model_adc = True, model_noise = True):
         super(TensorstaxModel, self).__init__()
         self.psf_size = psf_size
         self.model_adc = model_adc
+        self.model_noise = model_noise
 
     def build(self, input_shape):
         (self.batch_size, self.width, self.height, self.channels) = input_shape
@@ -68,6 +69,18 @@ class TensorstaxModel(tf.keras.Model):
             self.adc_function = tf.Variable(adc_guess)
             self.image_training_vars.append(self.adc_function)
 
+        if self.model_noise:
+            noise_shape = (self.width, self.height, self.channels)
+            self.noise_bias = tf.Variable(tf.zeros(noise_shape))
+            self.noise_scale = tf.Variable(tf.ones(noise_shape) * (1.0 / 256.0))
+            self.noise_image_bias = tf.Variable(tf.zeros(noise_shape))
+            self.noise_image_scale = tf.Variable(tf.ones(noise_shape))
+
+            self.image_training_vars.append(self.noise_bias)
+            self.image_training_vars.append(self.noise_scale)
+            self.image_training_vars.append(self.noise_image_bias)
+            self.image_training_vars.append(self.noise_image_scale)
+
     def default_point_spread_functions(self):
         psfs_shape = (self.batch_size, self.psf_size, self.psf_size, 1, self.channels)
         
@@ -96,6 +109,9 @@ class TensorstaxModel(tf.keras.Model):
             predicted_observed_image = tf.squeeze(predicted_observed_image, axis = 0)
             predicted_observed_images.append(predicted_observed_image)
         predicted_observed_images = tf.stack(predicted_observed_images, axis = 0)
+
+        if self.model_noise:
+            predicted_observed_images = predicted_observed_images * self.noise_image_scale + tf.random_normal(shape = self.noise_scale.shape) * self.noise_scale + self.noise_bias
 
         self.add_loss(tf.losses.mean_squared_error(observed_images, predicted_observed_images))
 
