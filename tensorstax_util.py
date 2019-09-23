@@ -3,12 +3,14 @@ import tensorflow as tf
 import tensorflow_graphics as tfg
 
 
-def read_image(filename):
+def read_image(filename, to_float = True, srgb_to_linear = True):
     print("Reading", filename)
-    image_bytes = tf.io.read_file(filename)
-    image_srgb_int = tf.io.decode_image(image_bytes)
-    image_srgb = tf.cast(image_srgb_int, tf.float32) / 255.0
-    image = tfg.image.color_space.linear_rgb.from_srgb(image_srgb)
+    image = tf.io.read_file(filename)
+    image = tf.io.decode_image(image)
+    if to_float:
+        image = tf.cast(image, tf.float32) / 255.0
+        if srgb_to_linear:
+            image = tfg.image.color_space.linear_rgb.from_srgb(image)
     return image
 
 def write_image(image, filename):
