@@ -1,28 +1,43 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_graphics as tfg
+import fnmatch
+from PIL import Image
 
+def map_along_tensor_axis(func, tensor, axis, keepdims = False):
+    if keepdims:
+        return tf.concat(list(map((lambda unstacked: func(tf.expand_dims(unstacked, axis = axis))), tf.unstack(tensor, axis = axis))), axis = axis)
+    else:
+        return tf.stack(list(map(func, tf.unstack(tensor, axis = axis))), axis = axis)
 
 def read_image(filename, to_float = True, srgb_to_linear = True):
     print("Reading", filename)
-    image = tf.io.read_file(filename)
-    image = tf.io.decode_image(image)
+    if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
+        image = Image.open(filename)
+        image = np.array(image)
+    else:
+        image = tf.io.read_file(filename)
+        image = tf.io.decode_image(image)
     if to_float:
         image = tf.cast(image, tf.float32) / 255.0
         if srgb_to_linear:
             image = tfg.image.color_space.linear_rgb.from_srgb(image)
     return image
 
-def write_image(image, filename):
+def write_image(image, filename, normalize = False, saturate = True):
     print("Writing", filename)
+    if normalize:
+        image = image / tf.reduce_max(image)
+    if saturate:
+        image = tf.minimum(1.0, image)
     image_srgb = tfg.image.color_space.srgb.from_linear_rgb(image) * 255.0  #hmm, correct rounding?
     image_srgb_int = tf.cast(image_srgb, tf.uint8)
     image_bytes = tf.image.encode_png(image_srgb_int)
     tf.io.write_file(filename, image_bytes)
 
-def write_sequential_image(image, basename, sequence_num):
-    write_image(image, basename + "_latest.png")
-    write_image(image, basename + "_{:08d}.png".format(sequence_num))
+def write_sequential_image(image, basename, sequence_num, **kwargs):
+    write_image(image, basename + "_latest.png", **kwargs)
+    write_image(image, basename + "_{:08d}.png".format(sequence_num), **kwargs)
 
 # return an array of which dimensions are x, y, etc., with channels being -1st dim
 def get_spatial_dims(num_spatial_dims = 2):
@@ -79,7 +94,7 @@ def pad_image(image, pad):
         image = tf.pad(image, paddings)
     return image
 
-def center_image(image, pad = 0):
+def center_image(image, pad = 0, only_even_shifts = False):
     image = pad_image(image, pad)
     
     spatial_dims = get_spatial_dims()    
@@ -90,7 +105,8 @@ def center_image(image, pad = 0):
     shift = tf.cast(shift, tf.int32)
 
     #theory - only shifting by multiples of 2 may help avoid artifacts do to sensor debayering
-    shift = tf.bitwise.bitwise_and(shift, -2)
+    if only_even_shifts:
+        shift = tf.bitwise.bitwise_and(shift, -2)
     
     shift = shift * -1
     #print("shift:", shift)
@@ -99,14 +115,28 @@ def center_image(image, pad = 0):
     return image
 
 
-def center_image_per_channel(image, pad = 0):
-    channel_images = tf.split(image, image.shape[-1], axis = -1)
+def center_image_per_channel(image, pad = 0, **kwargs):
+    return map_along_tensor_axis((lambda image: center_image(image, **kwargs)), image, axis = -1, keepdims = True)
     
-    centered_channel_images = []
-    for channel_image in channel_images:
-        centered_channel_image = center_image(channel_image, pad)
-        centered_channel_images.append(centered_channel_image)
 
-    centered_channel_images = tf.concat(centered_channel_images, axis = -1)
-    return centered_channel_images
+def vector_to_graph(v, ysize = None, line_thickness = 1):
+    if ysize is None:
+        ysize = v.shape[0]
+    
+    lin = tf.linspace(1.0, 0.0, ysize);
+    lin = tf.expand_dims(lin, axis = 1)
+    v = tf.expand_dims(v, axis = 0)
+    distances_to_line = tf.math.abs(v - lin) * tf.cast(ysize, tf.float32);
+    return tf.maximum(0, tf.minimum(1, (line_thickness / 2) - distances_to_line + 1))
 
+def adc_function_to_graph(adc, **kwargs):
+    channels = tf.unstack(adc, axis = -1)
+    channels = list(map((lambda channel: vector_to_graph(channel, **kwargs)), channels))
+    return tf.stack(channels, axis = -1)
+
+def center_images(images, **kwargs):
+    return map_along_tensor_axis((lambda image: center_image(image, **kwargs)), images, 0)
+
+    
+
+    

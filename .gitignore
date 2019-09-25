@@ -2,6 +2,8 @@ data/**/*.png
 data/**/*.mov
 data/**/*.avi
 data/**/*.gif
+data/**/*.tif
+data/**/*.tiff
 data/**/*.jpg
 data/**/*.jpeg
 obd/**

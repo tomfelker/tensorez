@@ -24,29 +24,19 @@ from tensorstax_util import *
 class TensorstaxModel(tf.keras.Model):
 
 
-    def __init__(self, psf_size = 32, model_adc = True, model_noise = True):
+    def __init__(self, psf_size = 32, model_adc = False, model_noise = False, super_resolution_factor = 2, images_were_centered = True):
         super(TensorstaxModel, self).__init__()
         self.psf_size = psf_size
         self.model_adc = model_adc
         self.model_noise = model_noise
-
-    def build(self, input_shape):
-        (self.batch_size, self.width, self.height, self.channels) = input_shape
-        print("Building model: batch_size {}, width {}, height {}, channels {}".format(self.batch_size, self.width, self.height, self.channels))
+        self.super_resolution_factor = super_resolution_factor
+        self.images_were_centered = images_were_centered
 
         # not just psf, but any variables that should be trained in that step, optimizing per-example beliefs, but holding our long-term belief about the world constant.
         self.psf_training_vars = []
 
         # not just the image, but any variables that should be trained in the second step, holding per-example beliefs constant, but optimizing our long-term belief about the world
         self.image_training_vars = []
-
-        self.estimated_image = tf.Variable(tf.zeros((self.width, self.height, self.channels)))
-        self.image_training_vars.append(self.estimated_image)
-        self.have_initial_estimate = False
-        
-
-        self.point_spread_functions = tf.Variable(self.default_point_spread_functions())
-        self.psf_training_vars.append(self.point_spread_functions)
 
         if self.model_adc:
             adc_guess = tf.linspace(0.0, 1.0, 256)           
@@ -68,6 +58,20 @@ class TensorstaxModel(tf.keras.Model):
             
             self.adc_function = tf.Variable(adc_guess)
             self.image_training_vars.append(self.adc_function)
+
+
+    def build(self, input_shape):
+        (self.batch_size, self.width, self.height, self.channels) = input_shape
+        print("Building model: batch_size {}, width {}, height {}, channels {}".format(self.batch_size, self.width, self.height, self.channels))
+
+        self.estimated_image = tf.Variable(tf.zeros((self.width * self.super_resolution_factor, self.height * self.super_resolution_factor, self.channels)))
+        self.image_training_vars.append(self.estimated_image)
+        self.have_initial_estimate = False
+        
+
+        self.point_spread_functions = tf.Variable(self.default_point_spread_functions())
+        self.psf_training_vars.append(self.point_spread_functions)
+
 
         if self.model_noise:
             noise_shape = (self.width, self.height, self.channels)
@@ -97,8 +101,23 @@ class TensorstaxModel(tf.keras.Model):
         observed_images = self.apply_adc_function(observed_images)
         
         if not self.have_initial_estimate:
-            print("Averaging images for initial estimate:")            
-            tf.assign(self.estimated_image, tf.reduce_mean(observed_images, axis = 0))
+            print("Averaging images for initial estimate:")
+            
+            if self.super_resolution_factor != 1:
+                if self.images_were_centered:
+                    print("centering images at super resolution")
+                    # images were already centered, so may as well center again with superres-pixel accuracy
+                    upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)                    
+                    centered_upscaled_images = center_images(upscaled_images, only_even_shifts = False)
+                    average_image = tf.reduce_mean(centered_upscaled_images, axis = 0)
+                else:
+                    # since images weren't centered, can't do our own centering or we may shift it by more than psf can account for.
+                    # so just upscale them all and average... not sure if it helps to upscale before the average, but it can't hurt...
+                    upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
+                    average_image = tf.reduce_mean(upscaled_images, axis = 0)
+            else:
+                average_image = tf.reduce_mean(observed_images, axis = 0)
+            tf.assign(self.estimated_image, average_image)
             self.have_initial_estimate = True
 
         estimated_image_extra_dim = tf.expand_dims(self.estimated_image, axis = 0)
@@ -110,8 +129,16 @@ class TensorstaxModel(tf.keras.Model):
             predicted_observed_images.append(predicted_observed_image)
         predicted_observed_images = tf.stack(predicted_observed_images, axis = 0)
 
+        if self.super_resolution_factor != 1:
+            # don't think the gradients are right for this... in any case, with it, estimated_image remains blocky
+            #predicted_observed_images = tf.image.resize(predicted_observed_images, (self.width, self.height), method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            predicted_observed_images = tf.nn.avg_pool2d(predicted_observed_images, ksize = self.super_resolution_factor, strides = self.super_resolution_factor, padding = 'SAME')
+
         if self.model_noise:
             predicted_observed_images = predicted_observed_images * self.noise_image_scale + tf.random_normal(shape = self.noise_scale.shape) * self.noise_scale + self.noise_bias
+
+        # saturating to 1 here intentionally kills gradients in the saturated parts, so we're not penalized
+        predicted_observed_images = tf.minimum(1.0, predicted_observed_images)
 
         self.add_loss(tf.losses.mean_squared_error(observed_images, predicted_observed_images))
 

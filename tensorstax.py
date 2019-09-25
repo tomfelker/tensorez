@@ -5,24 +5,36 @@ import glob
 from tensorstax_util import *
 from tensorstax_model import *
 
-model_adc = True
-model_noise = True
-psf_size = 128
-batch_size = 40
+# Try to model the ADC curve, in case it's not really sRGB..
+# although sadly, sometimes it just learns to kill the bottom of the curve to reduce its error, so it doesn't work great
+model_adc = False
 
-psf_training_steps = 10
+# Try to model sensor noise - not really working yet, as the image gets sucked into the noise and causes some weird artifacts (similar to when training too fast?)
+model_noise = False
+
+# makes sense for now, but won't really work with noise or debayering...
+center_images_beforehand = True
+
+super_resolution_factor = 4
+
+psf_size = 64
+image_count_limit = 50
+
+psf_training_steps = 50
 psf_learning_rate = .001
 
-image_training_steps = 10
+image_training_steps = 50
 image_learning_rate = .001
 
 overall_training_steps = 100
 
-data_path = os.path.join('data', 'saturn_bright_mvi_6902')
-#data_path = os.path.join('data', 'jupiter_mvi_6906')
-#data_path = os.path.join('obd', 'data','epsilon_lyrae')
+#file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
+#file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
+#file_glob = os.path.join('obd', 'data','epsilon_lyrae', '????????.png')
 
-file_glob = os.path.join(data_path, '????????.png')
+file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')
+
+
 
 output_dir = os.path.join("output", "latest")
 
@@ -36,13 +48,20 @@ images = []
 for filename in glob.glob(file_glob):
     images.append(read_image(filename, to_float = not model_adc))
     num_images += 1
-    if num_images == batch_size:
+    if num_images == image_count_limit:
         break
 images = tf.stack(images, axis = 0)
 
+if center_images_beforehand:
+    print("Centering images...")
+    images = center_images(images, only_even_shifts = True)
+
 
 print("Instantiating model.")
-model = TensorstaxModel(psf_size = psf_size, model_adc = model_adc, model_noise = model_noise)
+model = TensorstaxModel(psf_size = psf_size, model_adc = model_adc, model_noise = model_noise, super_resolution_factor = super_resolution_factor, images_were_centered = center_images_beforehand)
+
+if model.model_adc:
+    write_image(adc_function_to_graph(model.adc_function), os.path.join(output_dir, "initial_adc.png"))
 
 print("Beginning training....")
 
@@ -67,8 +86,7 @@ for overall_training_step in range(0, overall_training_steps):
 
         model.apply_psf_physicality_constraints()
 
-        psf_examples = model.get_psf_examples()
-        write_image(psf_examples, os.path.join(output_dir, "psf_examples_latest_{}.png".format(psf_training_step)))        
+        #write_image(model.get_psf_examples(), os.path.join(output_dir, "psf_examples_latest_{}.png".format(psf_training_step)))        
 
     write_sequential_image(model.get_psf_examples(), os.path.join(output_dir, "psf_examples"), overall_training_step)    
 
@@ -92,7 +110,9 @@ for overall_training_step in range(0, overall_training_steps):
         write_sequential_image(model.noise_scale, os.path.join(output_dir, "noise_scale"), overall_training_step)
         write_sequential_image(model.noise_image_scale, os.path.join(output_dir, "noise_image_scale"), overall_training_step)
     
-    model.print_adc_stats()
+    if model.model_adc:
+        model.print_adc_stats()
+        write_sequential_image(adc_function_to_graph(model.adc_function), os.path.join(output_dir, "adc"), overall_training_step)
     
 
 print("Cool");
