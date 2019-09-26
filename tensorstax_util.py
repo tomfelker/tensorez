@@ -10,6 +10,13 @@ def map_along_tensor_axis(func, tensor, axis, keepdims = False):
     else:
         return tf.stack(list(map(func, tf.unstack(tensor, axis = axis))), axis = axis)
 
+def promote_to_three_channels(image):
+    if image.shape.ndims == 4:
+        image = tf.squeeze(image, axis = -4)
+    if image.shape[-1] == 1:
+        image = tf.concat([image, image, image], axis = -1)
+    return image
+
 def read_image(filename, to_float = True, srgb_to_linear = True):
     print("Reading", filename)
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
@@ -30,6 +37,7 @@ def write_image(image, filename, normalize = False, saturate = True):
         image = image / tf.reduce_max(image)
     if saturate:
         image = tf.minimum(1.0, image)
+    image = promote_to_three_channels(image)
     image_srgb = tfg.image.color_space.srgb.from_linear_rgb(image) * 255.0  #hmm, correct rounding?
     image_srgb_int = tf.cast(image_srgb, tf.uint8)
     image_bytes = tf.image.encode_png(image_srgb_int)
