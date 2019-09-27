@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_graphics as tfg
+import os
 
 from tensorstax_util import *
 from tensorstax_bayer import *
@@ -25,7 +26,7 @@ from tensorstax_bayer import *
 class TensorstaxModel(tf.keras.Model):
 
 
-    def __init__(self, psf_size = 32, model_adc = False, model_noise = False, super_resolution_factor = 2, images_were_centered = True, model_bayer = True, bayer_tile_size = 2, demosaic_filter_size = 3):
+    def __init__(self, psf_size = 32, model_adc = False, model_noise = False, super_resolution_factor = 2, images_were_centered = True, model_bayer = False, model_demosaic = True, bayer_tile_size = 2, demosaic_filter_size = 3):
         super(TensorstaxModel, self).__init__()
         self.psf_size = psf_size
         self.model_adc = model_adc
@@ -33,6 +34,7 @@ class TensorstaxModel(tf.keras.Model):
         self.super_resolution_factor = super_resolution_factor
         self.images_were_centered = images_were_centered
         self.model_bayer = model_bayer
+        self.model_demosaic = model_demosaic
         self.bayer_tile_size = bayer_tile_size
         self.demosaic_filter_size = demosaic_filter_size
 
@@ -41,6 +43,8 @@ class TensorstaxModel(tf.keras.Model):
 
         # not just the image, but any variables that should be trained in the second step, holding per-example beliefs constant, but optimizing our long-term belief about the world
         self.image_training_vars = []
+
+        self.already_built = False
 
         if self.model_adc:
             adc_guess = tf.linspace(0.0, 1.0, 256)           
@@ -58,6 +62,10 @@ class TensorstaxModel(tf.keras.Model):
             self.image_training_vars.append(self.adc_function)
 
     def build(self, input_shape):
+        if self.already_built:
+            return
+        self.already_built = True
+        
         (self.batch_size, self.width, self.height, self.channels) = input_shape
         print("Building model: batch_size {}, width {}, height {}, channels {}".format(self.batch_size, self.width, self.height, self.channels))
 
@@ -88,6 +96,7 @@ class TensorstaxModel(tf.keras.Model):
             self.bayer_filters = tf.Variable(init_bayer_filters)
             self.image_training_vars.append(self.bayer_filters)
 
+        if self.model_demosaic:
             init_demosaic_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.demosaic_filter_size, self.demosaic_filter_size, 1, self.channels))
             init_demosaic_filters = init_demosaic_filters / (self.demosaic_filter_size * self.demosaic_filter_size)
             self.demosaic_filters = tf.Variable(init_demosaic_filters)
@@ -104,34 +113,36 @@ class TensorstaxModel(tf.keras.Model):
         return psfs
 
 
+    def compute_initial_estimate(self, observed_images):
+        self.build(observed_images.shape)
+        print("Averaging images for initial estimate:")
+        observed_images = self.apply_adc_function(observed_images)    
+        if self.super_resolution_factor != 1:
+            if self.images_were_centered:
+                print("centering images at super resolution")
+                # images were already centered, so may as well center again with superres-pixel accuracy
+                upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+                print("Upscale finished")
+                centered_upscaled_images = center_images(upscaled_images, only_even_shifts = False)
+                print("Centering finished")
+                average_image = tf.reduce_mean(centered_upscaled_images, axis = 0)
+                print("Averaging finished")
+            else:
+                # since images weren't centered, can't do our own centering or we may shift it by more than psf can account for.
+                # so just upscale them all and average... not sure if it helps to upscale before the average, but it can't hurt...
+                upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
+                average_image = tf.reduce_mean(upscaled_images, axis = 0)
+        else:
+            average_image = tf.reduce_mean(observed_images, axis = 0)
+        tf.assign(self.estimated_image, average_image)
+        self.have_initial_estimate = True
+        print("have initial estimated")
+
+
     def call(self, observed_images):
         
         observed_images = self.apply_adc_function(observed_images)
-        
-        if not self.have_initial_estimate:
-            print("Averaging images for initial estimate:")
             
-            if self.super_resolution_factor != 1:
-                if self.images_were_centered:
-                    print("centering images at super resolution")
-                    # images were already centered, so may as well center again with superres-pixel accuracy
-                    upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-                    print("Upscale finished")
-                    centered_upscaled_images = center_images(upscaled_images, only_even_shifts = False)
-                    print("Centering finished")
-                    average_image = tf.reduce_mean(centered_upscaled_images, axis = 0)
-                    print("Averaging finished")
-                else:
-                    # since images weren't centered, can't do our own centering or we may shift it by more than psf can account for.
-                    # so just upscale them all and average... not sure if it helps to upscale before the average, but it can't hurt...
-                    upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
-                    average_image = tf.reduce_mean(upscaled_images, axis = 0)
-            else:
-                average_image = tf.reduce_mean(observed_images, axis = 0)
-            tf.assign(self.estimated_image, average_image)
-            self.have_initial_estimate = True
-            print("have initial estimated")
-
         estimated_image_extra_dim = tf.expand_dims(self.estimated_image, axis = 0)
         
         predicted_observed_images = []
@@ -149,6 +160,8 @@ class TensorstaxModel(tf.keras.Model):
 
         if self.model_bayer:
             predicted_observed_images = apply_bayer_filter(predicted_observed_images, self.bayer_filters)
+
+        if self.model_demosaic:
             predicted_observed_images = apply_demosaic_filter(predicted_observed_images, self.demosaic_filters)
 
         # saturating to 1 here intentionally kills gradients in the saturated parts, so we're not penalized
@@ -205,3 +218,25 @@ class TensorstaxModel(tf.keras.Model):
 
             print("ADC MSE vs linear: {}".format(tf.losses.mean_squared_error(self.adc_function, self.adc_function_linear).numpy()))
             print("ADC MSE vs   sRGB: {}".format(tf.losses.mean_squared_error(self.adc_function, self.adc_function_srgb).numpy()))
+
+    def write_psf_debug_images(self, output_dir, step):
+        write_sequential_image(self.get_psf_examples(), os.path.join(output_dir, "psf_examples"), step)
+
+    def write_image_debug_images(self, output_dir, step):        
+        write_sequential_image(self.estimated_image, os.path.join(output_dir, "estimated_image"), step)
+        write_sequential_image(center_image_per_channel(self.estimated_image), os.path.join(output_dir, "estimated_image_centered"), step)
+
+        if self.model_noise:
+            write_sequential_image(self.noise_bias, os.path.join(output_dir, "noise_bias"), step)
+            write_sequential_image(self.noise_scale, os.path.join(output_dir, "noise_scale"), step)
+            write_sequential_image(self.noise_image_scale, os.path.join(output_dir, "noise_image_scale"), step)
+        
+        if self.model_adc:
+            self.print_adc_stats()
+            write_sequential_image(adc_function_to_graph(self.adc_function), os.path.join(output_dir, "adc"), step)
+
+        if self.model_bayer:
+            write_sequential_image(self.bayer_filters, os.path.join(output_dir, "bayer"), step)
+            
+        if self.model_demosaic:
+            write_sequential_image(demosaic_filters_to_image(self.demosaic_filters), os.path.join(output_dir, "demosaic"), step)

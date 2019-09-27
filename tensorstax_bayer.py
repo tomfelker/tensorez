@@ -40,6 +40,17 @@ def apply_demosaic_filter(bayer_filtered_image, demosaic_kernels):
     col_subimages = tf.reshape(col_subimages, shape = (bayer_filtered_image.shape[-4], bayer_filtered_image.shape[-3], bayer_filtered_image.shape[-2], bayer_filtered_image.shape[-1]))
     return col_subimages
 
+def demosaic_filters_to_image(demosaic_filters):
+    #return tf.reshape(demosaic_filters, (demosaic_filters.shape[-4] * demosaic_filters.shape[-6], demosaic_filters.shape[-3] * demosaic_filters.shape[-5], demosaic_filters.shape[-1]))
+
+    image = demosaic_filters
+    image = tf.concat(tf.unstack(image), axis = 0)
+    print("image.shape {}".format(image.shape))
+    image = tf.concat(tf.unstack(image), axis = 0)
+    print("image.shape {}".format(image.shape))
+    image = tf.squeeze(image, axis = -2)
+    print("image.shape {}".format(image.shape))
+    return image
 
 # And now some common kernels, for simulation and testing:
 # though really we want to learn these...

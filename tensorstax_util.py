@@ -10,6 +10,7 @@ def map_along_tensor_axis(func, tensor, axis, keepdims = False):
     else:
         return tf.stack(list(map(func, tf.unstack(tensor, axis = axis))), axis = axis)
 
+
 def promote_to_three_channels(image):
     if image.shape.ndims == 4:
         image = tf.squeeze(image, axis = -4)

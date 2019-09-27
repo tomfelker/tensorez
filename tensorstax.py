@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 import os
 import glob
+import datetime
 from tensorstax_util import *
 from tensorstax_model import *
 
@@ -12,7 +13,12 @@ model_adc = False
 # Try to model sensor noise - not really working yet, as the image gets sucked into the noise and causes some weird artifacts (similar to when training too fast?)
 model_noise = False
 
+# This actually may be pointless, because the bayer filter only discards information, which the demosaic filter could simply choose to disregard if it wants...
 model_bayer = True
+
+# But this is a good idea though
+model_demosaic = True
+
 bayer_tile_size = 2
 
 # if the images were already centered, and we're modelling bayer, we'll need to try to realign their bayer filters first... so we wish this were false, but c'est la vie
@@ -22,11 +28,14 @@ images_were_centered = True
 realign_images = True
 
 # use a larger estimate than the images themselves - should help if the PSFs are fairly small.
-super_resolution_factor = 2
+super_resolution_factor = 4
 
 # tunings
-psf_size = 32
-image_count_limit = 5
+
+# hmm, i have no idea why, but 64 inits way faster than 32
+psf_size = 64
+
+image_count_limit = 50
 
 psf_training_steps = 10
 psf_learning_rate = .001
@@ -44,7 +53,7 @@ overall_training_steps = 100
 
 file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')
 
-output_dir = os.path.join("output", "latest")
+output_dir = os.path.join("output", "latest_" + datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
 
 tf.enable_eager_execution()
 
@@ -129,6 +138,7 @@ model = TensorstaxModel(
     model_adc = model_adc,
     model_noise = model_noise,
     model_bayer = model_bayer,
+    model_demosaic = model_demosaic,
     bayer_tile_size = bayer_tile_size,
     super_resolution_factor = super_resolution_factor,
     images_were_centered = realign_images)
@@ -136,20 +146,25 @@ model = TensorstaxModel(
 if model.model_adc:
     write_image(adc_function_to_graph(model.adc_function), os.path.join(output_dir, "initial_adc.png"))
 
+model.compute_initial_estimate(images)
+
+model.write_psf_debug_images(output_dir, 0)
+model.write_image_debug_images(output_dir, 0)
+
 print("Beginning training....")
 
 image_optimizer = tf.train.AdamOptimizer(image_learning_rate)
-
 psf_optimizer = tf.train.AdamOptimizer(psf_learning_rate)
 
-for overall_training_step in range(0, overall_training_steps):
-
-    # init these inside the loop, so their momenta don't persist across updates
-    
-
+for overall_training_step in range(1, overall_training_steps):
 
     for psf_training_step in range(0, psf_training_steps):    
-        with tf.GradientTape() as psf_tape:
+        with tf.GradientTape(watch_accessed_variables = False) as psf_tape:
+            for var in model.psf_training_vars:
+                psf_tape.watch(var)
+            for var in model.losses:
+                psf_tape.watch(var)
+                
             model(images)
 
         print("Overall step {}, psf step {}: loss {}".format(overall_training_step, psf_training_step, sum(model.losses)))
@@ -161,10 +176,14 @@ for overall_training_step in range(0, overall_training_steps):
 
         #write_image(model.get_psf_examples(), os.path.join(output_dir, "psf_examples_latest_{}.png".format(psf_training_step)))        
 
-    write_sequential_image(model.get_psf_examples(), os.path.join(output_dir, "psf_examples"), overall_training_step)    
-
+    model.write_psf_debug_images(output_dir, overall_training_step)
+    
     for image_training_step in range(0, image_training_steps):
-        with tf.GradientTape() as image_tape:
+        with tf.GradientTape(watch_accessed_variables = False) as image_tape:
+            for var in model.image_training_vars:
+                image_tape.watch(var)
+            for var in model.losses:
+                image_tape.watch(var)
             model(images)
 
         grads = image_tape.gradient(model.losses, model.image_training_vars)
@@ -174,20 +193,7 @@ for overall_training_step in range(0, overall_training_steps):
 
         model.apply_image_physicality_constraints()
 
-    estimated_image = model.estimated_image
-    write_sequential_image(model.estimated_image, os.path.join(output_dir, "estimated_image"), overall_training_step)
-    write_sequential_image(center_image_per_channel(estimated_image), os.path.join(output_dir, "estimated_image_centered"), overall_training_step)
-
-    if model.model_noise:
-        write_sequential_image(model.noise_bias, os.path.join(output_dir, "noise_bias"), overall_training_step)
-        write_sequential_image(model.noise_scale, os.path.join(output_dir, "noise_scale"), overall_training_step)
-        write_sequential_image(model.noise_image_scale, os.path.join(output_dir, "noise_image_scale"), overall_training_step)
-    
-    if model.model_adc:
-        model.print_adc_stats()
-        write_sequential_image(adc_function_to_graph(model.adc_function), os.path.join(output_dir, "adc"), overall_training_step)
-    
-
+    model.write_image_debug_images(output_dir, overall_training_step)
 print("Cool");
 
     

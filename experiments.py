@@ -62,10 +62,14 @@ test_kernel = tf.cast([
 test_kernel = tf.expand_dims(test_kernel, axis = -2)
 
 
-demosaic_image = apply_demosaic_filter(bayer_filtered_image, demosaic_kernels_rggb)
+#demosaic_image = apply_demosaic_filter(bayer_filtered_image, demosaic_kernels_rggb)
+
+#do you even need the bayer filter?
+demosaic_image = apply_demosaic_filter(tf.expand_dims(example_image, axis = 0), demosaic_kernels_rggb)
 
 write_image(demosaic_image, os.path.join(output_dir, 'demosaic_image.png'))
 
+write_image(demosaic_filters_to_image(demosaic_kernels_rggb), os.path.join(output_dir, 'demosaic_filters.png'))
         
     
 
