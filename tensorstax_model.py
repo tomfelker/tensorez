@@ -3,6 +3,7 @@ import tensorflow as tf
 import tensorflow_graphics as tfg
 
 from tensorstax_util import *
+from tensorstax_bayer import *
 
 # Okay, this model is philosophically weird, in that it doesn't have any outputs.
 # We're not trying to get a quick forward pass, and minimize its error vs. some known data.
@@ -24,13 +25,16 @@ from tensorstax_util import *
 class TensorstaxModel(tf.keras.Model):
 
 
-    def __init__(self, psf_size = 32, model_adc = False, model_noise = False, super_resolution_factor = 2, images_were_centered = True):
+    def __init__(self, psf_size = 32, model_adc = False, model_noise = False, super_resolution_factor = 2, images_were_centered = True, model_bayer = True, bayer_tile_size = 2, demosaic_filter_size = 3):
         super(TensorstaxModel, self).__init__()
         self.psf_size = psf_size
         self.model_adc = model_adc
         self.model_noise = model_noise
         self.super_resolution_factor = super_resolution_factor
         self.images_were_centered = images_were_centered
+        self.model_bayer = model_bayer
+        self.bayer_tile_size = bayer_tile_size
+        self.demosaic_filter_size = demosaic_filter_size
 
         # not just psf, but any variables that should be trained in that step, optimizing per-example beliefs, but holding our long-term belief about the world constant.
         self.psf_training_vars = []
@@ -49,16 +53,9 @@ class TensorstaxModel(tf.keras.Model):
             
             adc_guess = tfg.image.color_space.linear_rgb.from_srgb(adc_guess)
             self.adc_function_srgb = adc_guess
-        
-            #print("ADC:")
-            #print(adc_guess.numpy())
-
-            #just one channel?
-            #adc_guess = adc_guess[..., 0]
-            
+                    
             self.adc_function = tf.Variable(adc_guess)
             self.image_training_vars.append(self.adc_function)
-
 
     def build(self, input_shape):
         (self.batch_size, self.width, self.height, self.channels) = input_shape
@@ -84,6 +81,17 @@ class TensorstaxModel(tf.keras.Model):
             self.image_training_vars.append(self.noise_scale)
             self.image_training_vars.append(self.noise_image_bias)
             self.image_training_vars.append(self.noise_image_scale)
+        
+        if self.model_bayer:
+            init_bayer_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.channels))
+            init_bayer_filters = init_bayer_filters / (self.bayer_tile_size * self.bayer_tile_size)            
+            self.bayer_filters = tf.Variable(init_bayer_filters)
+            self.image_training_vars.append(self.bayer_filters)
+
+            init_demosaic_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.demosaic_filter_size, self.demosaic_filter_size, 1, self.channels))
+            init_demosaic_filters = init_demosaic_filters / (self.demosaic_filter_size * self.demosaic_filter_size)
+            self.demosaic_filters = tf.Variable(init_demosaic_filters)
+            self.image_training_vars.append(self.demosaic_filters)
 
     def default_point_spread_functions(self):
         psfs_shape = (self.batch_size, self.psf_size, self.psf_size, 1, self.channels)
@@ -107,9 +115,12 @@ class TensorstaxModel(tf.keras.Model):
                 if self.images_were_centered:
                     print("centering images at super resolution")
                     # images were already centered, so may as well center again with superres-pixel accuracy
-                    upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)                    
+                    upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+                    print("Upscale finished")
                     centered_upscaled_images = center_images(upscaled_images, only_even_shifts = False)
+                    print("Centering finished")
                     average_image = tf.reduce_mean(centered_upscaled_images, axis = 0)
+                    print("Averaging finished")
                 else:
                     # since images weren't centered, can't do our own centering or we may shift it by more than psf can account for.
                     # so just upscale them all and average... not sure if it helps to upscale before the average, but it can't hurt...
@@ -119,6 +130,7 @@ class TensorstaxModel(tf.keras.Model):
                 average_image = tf.reduce_mean(observed_images, axis = 0)
             tf.assign(self.estimated_image, average_image)
             self.have_initial_estimate = True
+            print("have initial estimated")
 
         estimated_image_extra_dim = tf.expand_dims(self.estimated_image, axis = 0)
         
@@ -130,12 +142,14 @@ class TensorstaxModel(tf.keras.Model):
         predicted_observed_images = tf.stack(predicted_observed_images, axis = 0)
 
         if self.super_resolution_factor != 1:
-            # don't think the gradients are right for this... in any case, with it, estimated_image remains blocky
-            #predicted_observed_images = tf.image.resize(predicted_observed_images, (self.width, self.height), method = tf.image.ResizeMethod.NEAREST_NEIGHBOR)
             predicted_observed_images = tf.nn.avg_pool2d(predicted_observed_images, ksize = self.super_resolution_factor, strides = self.super_resolution_factor, padding = 'SAME')
 
         if self.model_noise:
             predicted_observed_images = predicted_observed_images * self.noise_image_scale + tf.random_normal(shape = self.noise_scale.shape) * self.noise_scale + self.noise_bias
+
+        if self.model_bayer:
+            predicted_observed_images = apply_bayer_filter(predicted_observed_images, self.bayer_filters)
+            predicted_observed_images = apply_demosaic_filter(predicted_observed_images, self.demosaic_filters)
 
         # saturating to 1 here intentionally kills gradients in the saturated parts, so we're not penalized
         predicted_observed_images = tf.minimum(1.0, predicted_observed_images)
