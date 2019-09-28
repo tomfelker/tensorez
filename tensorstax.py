@@ -22,36 +22,38 @@ model_demosaic = True
 bayer_tile_size = 2
 
 # if the images were already centered, and we're modelling bayer, we'll need to try to realign their bayer filters first... so we wish this were false, but c'est la vie
-images_were_centered = True
+images_were_centered = False
 
 # do the extra step of centering and aligning the images... lets us use smaller PSFs, so should be a win
 realign_images = True
 
 # use a larger estimate than the images themselves - should help if the PSFs are fairly small.
-super_resolution_factor = 4
+super_resolution_factor = 2
+
+bifurcated_training = False
 
 # tunings
 
 # hmm, i have no idea why, but 64 inits way faster than 32
-psf_size = 64
+psf_size = 32 * super_resolution_factor
 
-image_count_limit = 50
+image_count_limit = 15 # 200 oom
 
-psf_training_steps = 10
+psf_training_steps = 50
 psf_learning_rate = .001
 
-image_training_steps = 10
+image_training_steps = 50
 image_learning_rate = .001
 
 overall_training_steps = 100
 
 #data selection
 
-#file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
+file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
 #file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
 #file_glob = os.path.join('obd', 'data','epsilon_lyrae', '????????.png')
 
-file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')
+#file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')
 
 output_dir = os.path.join("output", "latest_" + datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
 
@@ -79,7 +81,7 @@ if realign_images:
     print("Centering images...")
     # if images were already centered, nothing to lose by shifting smaller than bayer pattern
     # todo: support bayer pattern size other than 2, "even"
-    images = center_images(images, only_even_shifts = not images_were_centered)
+    images = center_images(images, only_even_shifts = model_demosaic and not images_were_centered)
 
     if images_were_centered:
         # we need to re-align them to the bayer tile size
@@ -88,7 +90,7 @@ if realign_images:
 
         steps_with_no_shifts = 0
         for align_step in range(0, max_align_steps):
-            print("Aligning images, step {}".format(align_step))
+            print("Bayer aligning images, step {}".format(align_step))
         
             #average_image = tf.reduce_sum(images, axis = 0)
             average_image = images[0]
@@ -151,49 +153,79 @@ model.compute_initial_estimate(images)
 model.write_psf_debug_images(output_dir, 0)
 model.write_image_debug_images(output_dir, 0)
 
-print("Beginning training....")
+if bifurcated_training:
+    print("Beginning training....")
 
-image_optimizer = tf.train.AdamOptimizer(image_learning_rate)
-psf_optimizer = tf.train.AdamOptimizer(psf_learning_rate)
+    image_optimizer = tf.train.AdamOptimizer(image_learning_rate)
+    psf_optimizer = tf.train.AdamOptimizer(psf_learning_rate)
 
-for overall_training_step in range(1, overall_training_steps):
 
-    for psf_training_step in range(0, psf_training_steps):    
-        with tf.GradientTape(watch_accessed_variables = False) as psf_tape:
-            for var in model.psf_training_vars:
-                psf_tape.watch(var)
+    for overall_training_step in range(1, overall_training_steps):
+
+        for psf_training_step in range(0, psf_training_steps):    
+            with tf.GradientTape(watch_accessed_variables = False) as psf_tape:
+                for var in model.psf_training_vars:
+                    psf_tape.watch(var)
+                for var in model.losses:
+                    psf_tape.watch(var)
+                    
+                model(images)
+
+            print("Overall step {}, psf step {}: loss {}".format(overall_training_step, psf_training_step, sum(model.losses)))
+
+            grads = psf_tape.gradient(model.losses, model.psf_training_vars)
+            psf_optimizer.apply_gradients(zip(grads, model.psf_training_vars))
+
+            model.apply_psf_physicality_constraints()
+
+            #write_image(model.get_psf_examples(), os.path.join(output_dir, "psf_examples_latest_{}.png".format(psf_training_step)))        
+
+        model.write_psf_debug_images(output_dir, overall_training_step)
+        
+        for image_training_step in range(0, image_training_steps):
+            with tf.GradientTape(watch_accessed_variables = False) as image_tape:
+                for var in model.image_training_vars:
+                    image_tape.watch(var)
+                for var in model.losses:
+                    image_tape.watch(var)
+                model(images)
+
+            grads = image_tape.gradient(model.losses, model.image_training_vars)
+            image_optimizer.apply_gradients(zip(grads, model.image_training_vars))
+
+            print("Overall step {}, image step {}: loss {}".format(overall_training_step, image_training_step, sum(model.losses)))
+
+            model.apply_image_physicality_constraints()
+
+        model.write_image_debug_images(output_dir, overall_training_step)
+
+else:
+    print("unified training...")
+
+    optimizer = tf.train.AdamOptimizer(image_learning_rate)
+    for overall_training_step in range(1, overall_training_steps * (psf_training_steps + image_training_steps)):
+        all_vars = model.psf_training_vars + model.image_training_vars
+        with tf.GradientTape(watch_accessed_variables = False) as tape:
+            for var in all_vars:
+                tape.watch(var)            
             for var in model.losses:
-                psf_tape.watch(var)
+                tape.watch(var)
                 
             model(images)
 
-        print("Overall step {}, psf step {}: loss {}".format(overall_training_step, psf_training_step, sum(model.losses)))
+        print("Step {} loss {}".format(overall_training_step, sum(model.losses)))
 
-        grads = psf_tape.gradient(model.losses, model.psf_training_vars)
-        psf_optimizer.apply_gradients(zip(grads, model.psf_training_vars))
+        grads = tape.gradient(model.losses, all_vars)
+        optimizer.apply_gradients(zip(grads, all_vars))
 
         model.apply_psf_physicality_constraints()
-
-        #write_image(model.get_psf_examples(), os.path.join(output_dir, "psf_examples_latest_{}.png".format(psf_training_step)))        
-
-    model.write_psf_debug_images(output_dir, overall_training_step)
-    
-    for image_training_step in range(0, image_training_steps):
-        with tf.GradientTape(watch_accessed_variables = False) as image_tape:
-            for var in model.image_training_vars:
-                image_tape.watch(var)
-            for var in model.losses:
-                image_tape.watch(var)
-            model(images)
-
-        grads = image_tape.gradient(model.losses, model.image_training_vars)
-        image_optimizer.apply_gradients(zip(grads, model.image_training_vars))
-
-        print("Overall step {}, image step {}: loss {}".format(overall_training_step, image_training_step, sum(model.losses)))
-
         model.apply_image_physicality_constraints()
 
-    model.write_image_debug_images(output_dir, overall_training_step)
+        if overall_training_step < 10 or overall_training_step % 10 == 0:
+            model.write_psf_debug_images(output_dir, overall_training_step)
+            model.write_image_debug_images(output_dir, overall_training_step)
+
+        
 print("Cool");
 
     

@@ -69,7 +69,7 @@ class TensorstaxModel(tf.keras.Model):
         (self.batch_size, self.width, self.height, self.channels) = input_shape
         print("Building model: batch_size {}, width {}, height {}, channels {}".format(self.batch_size, self.width, self.height, self.channels))
 
-        self.estimated_image = tf.Variable(tf.zeros((self.width * self.super_resolution_factor, self.height * self.super_resolution_factor, self.channels)))
+        self.estimated_image = tf.Variable(tf.zeros((1, self.width * self.super_resolution_factor, self.height * self.super_resolution_factor, self.channels)))
         self.image_training_vars.append(self.estimated_image)
         self.have_initial_estimate = False
         
@@ -97,8 +97,9 @@ class TensorstaxModel(tf.keras.Model):
             self.image_training_vars.append(self.bayer_filters)
 
         if self.model_demosaic:
-            init_demosaic_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.demosaic_filter_size, self.demosaic_filter_size, 1, self.channels))
-            init_demosaic_filters = init_demosaic_filters / (self.demosaic_filter_size * self.demosaic_filter_size)
+            #init_demosaic_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.demosaic_filter_size, self.demosaic_filter_size, 1, self.channels))
+            #init_demosaic_filters = init_demosaic_filters / (self.demosaic_filter_size * self.demosaic_filter_size)
+            init_demosaic_filters = demosaic_kernels_null
             self.demosaic_filters = tf.Variable(init_demosaic_filters)
             self.image_training_vars.append(self.demosaic_filters)
 
@@ -125,7 +126,7 @@ class TensorstaxModel(tf.keras.Model):
                 print("Upscale finished")
                 centered_upscaled_images = center_images(upscaled_images, only_even_shifts = False)
                 print("Centering finished")
-                average_image = tf.reduce_mean(centered_upscaled_images, axis = 0)
+                average_image = tf.reduce_mean(centered_upscaled_images, axis = 0, keepdims = True)
                 print("Averaging finished")
             else:
                 # since images weren't centered, can't do our own centering or we may shift it by more than psf can account for.
@@ -133,21 +134,16 @@ class TensorstaxModel(tf.keras.Model):
                 upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
                 average_image = tf.reduce_mean(upscaled_images, axis = 0)
         else:
-            average_image = tf.reduce_mean(observed_images, axis = 0)
+            average_image = tf.reduce_mean(observed_images, axis = 0, keepdims = True)
         tf.assign(self.estimated_image, average_image)
         self.have_initial_estimate = True
         print("have initial estimated")
 
-
-    def call(self, observed_images):
-        
-        observed_images = self.apply_adc_function(observed_images)
-            
-        estimated_image_extra_dim = tf.expand_dims(self.estimated_image, axis = 0)
+    def predict_observed_images(self):
         
         predicted_observed_images = []
         for example_index in range(0, self.batch_size):            
-            predicted_observed_image = tf.nn.conv2d(estimated_image_extra_dim, self.point_spread_functions[example_index, ...], padding = 'SAME')
+            predicted_observed_image = tf.nn.conv2d(self.estimated_image, self.point_spread_functions[example_index, ...], padding = 'SAME')
             predicted_observed_image = tf.squeeze(predicted_observed_image, axis = 0)
             predicted_observed_images.append(predicted_observed_image)
         predicted_observed_images = tf.stack(predicted_observed_images, axis = 0)
@@ -164,6 +160,15 @@ class TensorstaxModel(tf.keras.Model):
         if self.model_demosaic:
             predicted_observed_images = apply_demosaic_filter(predicted_observed_images, self.demosaic_filters)
 
+        return predicted_observed_images
+
+
+    def call(self, observed_images):
+        
+        observed_images = self.apply_adc_function(observed_images)
+            
+        predicted_observed_images = self.predict_observed_images()
+        
         # saturating to 1 here intentionally kills gradients in the saturated parts, so we're not penalized
         predicted_observed_images = tf.minimum(1.0, predicted_observed_images)
 
@@ -224,7 +229,7 @@ class TensorstaxModel(tf.keras.Model):
 
     def write_image_debug_images(self, output_dir, step):        
         write_sequential_image(self.estimated_image, os.path.join(output_dir, "estimated_image"), step)
-        write_sequential_image(center_image_per_channel(self.estimated_image), os.path.join(output_dir, "estimated_image_centered"), step)
+        write_sequential_image(center_image_per_channel(tf.squeeze(self.estimated_image, axis = 0)), os.path.join(output_dir, "estimated_image_centered"), step)
 
         if self.model_noise:
             write_sequential_image(self.noise_bias, os.path.join(output_dir, "noise_bias"), step)
@@ -240,3 +245,30 @@ class TensorstaxModel(tf.keras.Model):
             
         if self.model_demosaic:
             write_sequential_image(demosaic_filters_to_image(self.demosaic_filters), os.path.join(output_dir, "demosaic"), step)
+
+
+    def generate_synthetic_data(truth_image, psf_variance = 4, psf_jitter = 4):
+        print("Setting up model for synthetic data...")
+
+        truth_image = tf.image.resize(truth_image, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
+        tf.assign(self.estimated_image, truth_image)
+
+        # rest todo...
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
