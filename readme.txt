@@ -1,11 +1,10 @@
-TensorStax
+﻿TensoRez
 ==========
 
-Name a work in progress...
-
-Idea: Use the powah of GPUs and Tensorflow and python and github, to write some software for planetary imaging that
-- doesn't require manual picking of tracking points, dafuq is this?
-- isn't finicky
+Idea: Use the power of GPUs and Tensorflow and python and github, to write some software for planetary imaging that
+- doesn't require manual picking of tracking points, who has time for that?
+- isn't finicky, with few magic numbers
+- doesn't let people tweak the result so much that it becomes more art than science
 - is open source
 
 So, we take a video of a planet, or the Moon, or a satellite, or whatever, through a telescope.

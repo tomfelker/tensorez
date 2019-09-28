@@ -3,8 +3,10 @@ import tensorflow as tf
 import os
 import glob
 import datetime
-from tensorstax_util import *
-from tensorstax_model import *
+
+from tensorez.model import *
+from tensorez.util import *
+
 
 # Try to model the ADC curve, in case it's not really sRGB..
 # although sadly, sometimes it just learns to kill the bottom of the curve to reduce its error, so it doesn't work great
@@ -14,10 +16,10 @@ model_adc = False
 model_noise = False
 
 # This actually may be pointless, because the bayer filter only discards information, which the demosaic filter could simply choose to disregard if it wants...
-model_bayer = True
+model_bayer = False
 
 # But this is a good idea though
-model_demosaic = True
+model_demosaic = False
 
 bayer_tile_size = 2
 
@@ -135,7 +137,7 @@ if realign_images:
 
 
 print("Instantiating model.")
-model = TensorstaxModel(
+model = TensoRezModel(
     psf_size = psf_size,
     model_adc = model_adc,
     model_noise = model_noise,

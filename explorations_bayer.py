@@ -10,9 +10,9 @@ import numpy as np
 import tensorflow as tf
 import os
 import glob
-from tensorstax_util import *
-from tensorstax_model import *
-from tensorstax_bayer import *
+from tensorez.util import *
+from tensorez.model import *
+from tensorez.bayer import *
 
 output_dir = os.path.join('output', 'experiments')
 

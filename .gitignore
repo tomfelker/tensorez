@@ -8,6 +8,6 @@ data/**/*.jpg
 data/**/*.jpeg
 obd/**
 output/*
-__pycache__/*
+**/__pycache__/*
 *.zip
 *.pdf

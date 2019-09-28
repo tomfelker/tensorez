@@ -3,8 +3,8 @@ import tensorflow as tf
 import tensorflow_graphics as tfg
 import os
 
-from tensorstax_util import *
-from tensorstax_bayer import *
+from tensorez.util import *
+from tensorez.bayer import *
 
 # Okay, this model is philosophically weird, in that it doesn't have any outputs.
 # We're not trying to get a quick forward pass, and minimize its error vs. some known data.
@@ -23,11 +23,11 @@ from tensorstax_bayer import *
 # And perhaps the only purpose of making this a Keras model is for the handy storing of trainable variables...
 
 
-class TensorstaxModel(tf.keras.Model):
+class TensoRezModel(tf.keras.Model):
 
 
     def __init__(self, psf_size = 32, model_adc = False, model_noise = False, super_resolution_factor = 2, images_were_centered = True, model_bayer = False, model_demosaic = True, bayer_tile_size = 2, demosaic_filter_size = 3):
-        super(TensorstaxModel, self).__init__()
+        super(TensoRezModel, self).__init__()
         self.psf_size = psf_size
         self.model_adc = model_adc
         self.model_noise = model_noise
