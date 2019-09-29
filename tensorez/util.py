@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_graphics as tfg
 import fnmatch
+import os
 
 from tensorez.bayer import *
 
@@ -92,6 +93,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
     else:
         image = tf.io.read_file(filename)
         image = tf.io.decode_image(image)
+        image = tf.expand_dims(image, axis = -4)
         image = crop_image(image, crop = crop, crop_align = crop_align)
         if to_float:
             image = tf.cast(image, tf.float32) / 255.0
@@ -111,9 +113,23 @@ def write_image(image, filename, normalize = False, saturate = True):
     image_bytes = tf.image.encode_png(image_srgb_int)
     tf.io.write_file(filename, image_bytes)
 
-def write_sequential_image(image, basename, sequence_num, **kwargs):
-    write_image(image, basename + "_latest.png", **kwargs)
-    write_image(image, basename + "_{:08d}.png".format(sequence_num), **kwargs)
+def write_sequential_image(image, path, name, sequence_num, extension = 'png', **write_image_args):
+    name_with_sequence = "{}_{:08d}.{}".format(name, sequence_num, extension)
+    name_with_latest = "{}_latest.{}".format(name, extension)
+
+    if sequence_num == 0:
+        history_path = os.path.join(path, 'initial', name_with_sequence)
+    else:
+        history_path = os.path.join(path, 'history', name, name_with_sequence)
+        
+    temp_path = os.path.join(path, name_with_sequence)
+    latest_path = os.path.join(path, name_with_latest)
+    
+    write_image(image, history_path, **write_image_args)
+    # hard links on windows!  Let's hope it doesn't all come crashing down... but if we do it right, it's atomic and we only wrote the file once.
+    # would be best on linux, where we could link and replace in one atomic step without the temp name, but python doesn't expose this, and windows probably can't do it
+    os.link(history_path, temp_path)
+    os.replace(temp_path, latest_path)    
 
 # return an array of which dimensions are x, y, etc., with channels being -1st dim
 def get_spatial_dims(num_spatial_dims = 2):
@@ -190,13 +206,14 @@ def center_image(image, pad = 0, only_even_shifts = False):
     
     shift = shift * -1
     #print("shift:", shift)
-    image = tf.roll(image, shift = shift, axis = spatial_dims)
+    shift_axis = spatial_dims
+    image = tf.roll(image, shift = shift, axis = shift_axis)
 
-    return image
+    return image, shift, shift_axis
 
 
 def center_image_per_channel(image, pad = 0, **kwargs):
-    return map_along_tensor_axis((lambda image: center_image(image, **kwargs)), image, axis = -1, keepdims = True)
+    return map_along_tensor_axis((lambda image: center_image(image, **kwargs)[0]), image, axis = -1, keepdims = True)
     
 
 def vector_to_graph(v, ysize = None, line_thickness = 1):
@@ -216,7 +233,7 @@ def adc_function_to_graph(adc, **kwargs):
 
 def center_images(images, **kwargs):
     print("centering images, shape {}".format(images.shape))
-    return map_along_tensor_axis((lambda image: center_image(image, **kwargs)), images, 0)
+    return map_along_tensor_axis((lambda image: center_image(image, **kwargs)[0]), images, 0)
 
     
 

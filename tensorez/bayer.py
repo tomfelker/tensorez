@@ -1,8 +1,8 @@
 import numpy as np
 import tensorflow as tf
 
-
-tf.enable_eager_execution()
+# don't like putting this at module scope, but needed for the hardcoded tensors below
+tf.compat.v1.enable_eager_execution()
 
 # image has shape (batch, height, width, channels)
 # bayer_filter has shape (height, width, channels) and is generally 2x2  [r,g],[g,b], and tiles across the image
