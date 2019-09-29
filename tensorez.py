@@ -118,7 +118,7 @@ image_learning_rate = .001
 # Only load this many images.  May be necessary to prevent out-of-memory,
 # or for testing.  Someday, support for batching may improve this.
 #
-image_count_limit = 15
+image_count_limit = None
 
 # Give a (width, height) tuple here to crop the images to a given size around
 # their center.  Some data below may reset this.
@@ -130,7 +130,7 @@ crop = None
 file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
 #file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
 #file_glob = os.path.join('obd', 'data','epsilon_lyrae', '????????.png')
-#file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')
+#file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif'); image_count_limit = 50
 #file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512);
 
 # Put the data here.

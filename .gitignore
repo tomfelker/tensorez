@@ -12,3 +12,6 @@ output/*
 **/__pycache__/*
 *.zip
 *.pdf
+
+# release the following
+!data/jupiter_mvi_6906/????????.png
