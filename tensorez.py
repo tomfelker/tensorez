@@ -16,7 +16,7 @@ model_adc = False
 model_noise = False
 
 # This actually may be pointless, because the bayer filter only discards information, which the demosaic filter could simply choose to disregard if it wants...
-model_bayer = False
+model_bayer = True
 
 # But this is a good idea though
 model_demosaic = False
@@ -26,13 +26,18 @@ bayer_tile_size = 2
 # if the images were already centered, and we're modelling bayer, we'll need to try to realign their bayer filters first... so we wish this were false, but c'est la vie
 images_were_centered = False
 
+# if true, we demosaic them for computing averages, but not otherwise
+images_are_raw = False
+
 # do the extra step of centering and aligning the images... lets us use smaller PSFs, so should be a win
-realign_images = True
+# but realign currently uses Center of Mass, which only really works for planets, not even ISS... need some autocorrelation based thing...
+realign_images = False
 
 # use a larger estimate than the images themselves - should help if the PSFs are fairly small.
 super_resolution_factor = 2
 
 bifurcated_training = False
+
 
 # tunings
 
@@ -41,21 +46,23 @@ psf_size = 32 * super_resolution_factor
 
 image_count_limit = 15 # 200 oom
 
-psf_training_steps = 50
+psf_training_steps = 1
 psf_learning_rate = .001
 
-image_training_steps = 50
+image_training_steps = 1
 image_learning_rate = .001
 
-overall_training_steps = 100
+overall_training_steps = 1000
+
+crop = None
 
 #data selection
 
-file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
+#file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
 #file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
 #file_glob = os.path.join('obd', 'data','epsilon_lyrae', '????????.png')
-
 #file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')
+file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512); images_are_raw = True
 
 output_dir = os.path.join("output", "latest_" + datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
 
@@ -64,13 +71,27 @@ tf.enable_eager_execution()
 # for now, just a single batch
 print("Reading input images...")
 num_images = 0
-images = []
+
+color_images = []
+raw_images = []
+
 for filename in glob.glob(file_glob):
-    images.append(read_image(filename, to_float = not model_adc))
+    color_image = read_image(filename, to_float = not model_adc, crop = crop, demosaic = True)
+    color_images.append(color_image)
+
+    if images_are_raw:
+        raw_image = read_image(filename, to_float = not model_adc, crop = crop, demosaic = False)
+        raw_images.append(raw_image)
+    
     num_images += 1
     if num_images == image_count_limit:
         break
-images = tf.stack(images, axis = 0)
+color_images = tf.concat(color_images, axis = -4)
+if images_are_raw:
+    raw_images = tf.concat(raw_images, axis = -4)
+else:
+    raw_images = color_images
+
 
 def reduce_image_to_tile(image, tile_size):
     slices = tf.split(image, num_or_size_splits = image.shape[-3] // tile_size, axis = -3)
@@ -79,6 +100,7 @@ def reduce_image_to_tile(image, tile_size):
     image = tf.reduce_mean(tf.stack(slices, axis = 0), axis = 0)
     return image    
 
+# todo: must rejigger this to handle shifting both sets of images equally...
 if realign_images:
     print("Centering images...")
     # if images were already centered, nothing to lose by shifting smaller than bayer pattern
@@ -150,7 +172,7 @@ model = TensoRezModel(
 if model.model_adc:
     write_image(adc_function_to_graph(model.adc_function), os.path.join(output_dir, "initial_adc.png"))
 
-model.compute_initial_estimate(images)
+model.compute_initial_estimate(color_images)
 
 model.write_psf_debug_images(output_dir, 0)
 model.write_image_debug_images(output_dir, 0)
@@ -171,7 +193,7 @@ if bifurcated_training:
                 for var in model.losses:
                     psf_tape.watch(var)
                     
-                model(images)
+                model(raw_images)
 
             print("Overall step {}, psf step {}: loss {}".format(overall_training_step, psf_training_step, sum(model.losses)))
 
@@ -190,7 +212,7 @@ if bifurcated_training:
                     image_tape.watch(var)
                 for var in model.losses:
                     image_tape.watch(var)
-                model(images)
+                model(raw_images)
 
             grads = image_tape.gradient(model.losses, model.image_training_vars)
             image_optimizer.apply_gradients(zip(grads, model.image_training_vars))
@@ -213,7 +235,7 @@ else:
             for var in model.losses:
                 tape.watch(var)
                 
-            model(images)
+            model(raw_images)
 
         print("Step {} loss {}".format(overall_training_step, sum(model.losses)))
 

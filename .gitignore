@@ -6,6 +6,7 @@ data/**/*.tif
 data/**/*.tiff
 data/**/*.jpg
 data/**/*.jpeg
+data/**/*.cr2
 obd/**
 output/*
 **/__pycache__/*

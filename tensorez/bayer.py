@@ -9,7 +9,8 @@ tf.enable_eager_execution()
 def apply_bayer_filter(image, bayer_filter_tile):
     bayer_filter_full = tf.tile(bayer_filter_tile, multiples = (image.shape[-3] // bayer_filter_tile.shape[-3], image.shape[-2] // bayer_filter_tile.shape[-2], 1))
     bayer_filtered_image = image * bayer_filter_full
-    return bayer_filtered_image
+    bayer_filtered_image_mono = tf.reduce_sum(bayer_filtered_image, axis = -1, keepdims = True)
+    return bayer_filtered_image_mono
 
 #bayer_filtered_image has shape (batch, height, width, channels)
 #demosaic_kernels has shape (bayer_height, bayer_width, kernel_height, kernel_width, 1, channels)
@@ -34,10 +35,10 @@ def apply_demosaic_filter(bayer_filtered_image, demosaic_kernels):
             # and now for a bunch of voodoo magic with indices to recombine this monstrosity...
             row_subimages.append(subimage_for_tile_pos)
         row_subimages = tf.stack(row_subimages, axis = -2)    
-        row_subimages = tf.reshape(row_subimages, shape = (bayer_filtered_image.shape[-4], bayer_filtered_image.shape[-3] // bayer_height, bayer_filtered_image.shape[-2], bayer_filtered_image.shape[-1]))
+        row_subimages = tf.reshape(row_subimages, shape = (bayer_filtered_image.shape[-4], bayer_filtered_image.shape[-3] // bayer_height, bayer_filtered_image.shape[-2], demosaic_kernels.shape[-1]))
         col_subimages.append(row_subimages)
     col_subimages = tf.stack(col_subimages, axis = -3)
-    col_subimages = tf.reshape(col_subimages, shape = (bayer_filtered_image.shape[-4], bayer_filtered_image.shape[-3], bayer_filtered_image.shape[-2], bayer_filtered_image.shape[-1]))
+    col_subimages = tf.reshape(col_subimages, shape = (bayer_filtered_image.shape[-4], bayer_filtered_image.shape[-3], bayer_filtered_image.shape[-2], demosaic_kernels.shape[-1]))
     return col_subimages
 
 def demosaic_filters_to_image(demosaic_filters):
@@ -45,11 +46,8 @@ def demosaic_filters_to_image(demosaic_filters):
 
     image = demosaic_filters
     image = tf.concat(tf.unstack(image), axis = 0)
-    print("image.shape {}".format(image.shape))
     image = tf.concat(tf.unstack(image), axis = 0)
-    print("image.shape {}".format(image.shape))
     image = tf.squeeze(image, axis = -2)
-    print("image.shape {}".format(image.shape))
     return image
 
 # And now some common kernels, for simulation and testing:

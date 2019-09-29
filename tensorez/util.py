@@ -2,7 +2,14 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_graphics as tfg
 import fnmatch
+
+from tensorez.bayer import *
+
 from PIL import Image
+try:
+    import rawpy
+except:
+    print("Failed to import RawPY, needed for raw (CR2, etc.) support...")
 
 def map_along_tensor_axis(func, tensor, axis, keepdims = False):
     if keepdims:
@@ -18,18 +25,78 @@ def promote_to_three_channels(image):
         image = tf.concat([image, image, image], axis = -1)
     return image
 
-def read_image(filename, to_float = True, srgb_to_linear = True):
+def crop_image(image, crop, crop_align):
+    if crop is not None:
+        width, height = crop
+        x = (image.shape[-2] - width) // 2
+        y = (image.shape[-3] - height) // 2
+        x = (x // crop_align) * crop_align
+        y = (y // crop_align) * crop_align
+        return image[..., y : y + height, x : x + width, :]
+    return image
+
+def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, color_balance = True, demosaic = True):
     print("Reading", filename)
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
-        image = Image.open(filename)
+        image = Image.open(filename)        
         image = np.array(image)
+        image = crop_image(image, crop = crop, crop_align = crop_align)
+    if fnmatch.fnmatch(filename, '*.cr2'):
+        # For raw files, we will read them into a full color image, but with the bayer pattern... this way,
+        # we can easily handle whatever bayer pattern
+
+        with rawpy.imread(filename) as raw:
+            # Note: there seems to be a bug where if you leave the image in numpy-land and let raw go out of scope, it silently crashes.
+            # Copying to tensorflow seems to work around it.  Making a numpy copy to be doubly sure.
+            image = np.copy(raw.raw_image_visible)
+            image = tf.expand_dims(image, axis = -1)
+            image = tf.expand_dims(image, axis = 0)
+            image = crop_image(image, crop = crop, crop_align = crop_align)
+            # todo: color balance?
+            # todo: black level?
+            # todo: curve?
+            # todo: warn about weird raw settings
+            # todo, why exactly 14 bits?  just my camera?
+            if to_float:
+                image = tf.cast(image, tf.float32)
+                
+                if ((color_balance or demosaic) and (
+                    chr(raw.color_desc[raw.raw_pattern[0,0]]) != 'R' or
+                    chr(raw.color_desc[raw.raw_pattern[0,1]]) != 'G' or
+                    chr(raw.color_desc[raw.raw_pattern[1,0]]) != 'G' or
+                    chr(raw.color_desc[raw.raw_pattern[1,1]]) != 'B')):
+                        print("Warning: raw file has weird bayer pattern {}".format(raw.color_desc))
+                
+                if color_balance:
+
+                    scale_tile = tf.convert_to_tensor([
+                        [raw.daylight_whitebalance[0], raw.daylight_whitebalance[1]],
+                        [raw.daylight_whitebalance[1], raw.daylight_whitebalance[2]]
+                        ], dtype = tf.float32)
+                    black_tile = tf.convert_to_tensor([
+                        [raw.black_level_per_channel[raw.raw_pattern[0,0]], raw.black_level_per_channel[raw.raw_pattern[0,1]]],
+                        [raw.black_level_per_channel[raw.raw_pattern[1,0]], raw.black_level_per_channel[raw.raw_pattern[1,1]]]                        
+                        ], dtype = tf.float32)
+
+                    scale_tile /= 16383.0
+
+                    scale = tf.reshape(tf.tile(scale_tile, multiples = (image.shape[-3] // 2, image.shape[-2] // 2)), image.shape)
+                    black = tf.reshape(tf.tile(black_tile, multiples = (image.shape[-3] // 2, image.shape[-2] // 2)), image.shape)
+
+                    image = (image - black) * scale
+
+                if demosaic:
+                    image = apply_demosaic_filter(image, demosaic_kernels_rggb)
+
+                           
     else:
         image = tf.io.read_file(filename)
         image = tf.io.decode_image(image)
-    if to_float:
-        image = tf.cast(image, tf.float32) / 255.0
-        if srgb_to_linear:
-            image = tfg.image.color_space.linear_rgb.from_srgb(image)
+        image = crop_image(image, crop = crop, crop_align = crop_align)
+        if to_float:
+            image = tf.cast(image, tf.float32) / 255.0
+            if srgb_to_linear:
+                image = tfg.image.color_space.linear_rgb.from_srgb(image)
     return image
 
 def write_image(image, filename, normalize = False, saturate = True):
@@ -56,6 +123,10 @@ def get_spatial_dims(num_spatial_dims = 2):
     return spatial_dims
 
 def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True):
+    # todo: fix this - it's too complicated, and doesn't work batchwise...
+    if image.shape.ndims == 4:
+        image = tf.squeeze(image, axis = -4)
+    
     #print("image.shape:", image.shape)
 
     spatial_dims = get_spatial_dims(num_spatial_dims)
@@ -144,6 +215,7 @@ def adc_function_to_graph(adc, **kwargs):
     return tf.stack(channels, axis = -1)
 
 def center_images(images, **kwargs):
+    print("centering images, shape {}".format(images.shape))
     return map_along_tensor_axis((lambda image: center_image(image, **kwargs)), images, 0)
 
     

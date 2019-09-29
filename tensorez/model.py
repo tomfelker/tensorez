@@ -65,7 +65,8 @@ class TensoRezModel(tf.keras.Model):
         if self.already_built:
             return
         self.already_built = True
-        
+
+        print(input_shape)
         (self.batch_size, self.width, self.height, self.channels) = input_shape
         print("Building model: batch_size {}, width {}, height {}, channels {}".format(self.batch_size, self.width, self.height, self.channels))
 
@@ -91,15 +92,23 @@ class TensoRezModel(tf.keras.Model):
             self.image_training_vars.append(self.noise_image_scale)
         
         if self.model_bayer:
-            init_bayer_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.channels))
-            init_bayer_filters = init_bayer_filters / (self.bayer_tile_size * self.bayer_tile_size)            
+            #init_bayer_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.channels))
+            #init_bayer_filters = init_bayer_filters / (self.bayer_tile_size * self.bayer_tile_size)
+
+            # todo: try more to learn these...
+            init_bayer_filters = bayer_filter_tile_rggb
+            
             self.bayer_filters = tf.Variable(init_bayer_filters)
             self.image_training_vars.append(self.bayer_filters)
 
         if self.model_demosaic:
             #init_demosaic_filters = tf.ones(shape = (self.bayer_tile_size, self.bayer_tile_size, self.demosaic_filter_size, self.demosaic_filter_size, 1, self.channels))
             #init_demosaic_filters = init_demosaic_filters / (self.demosaic_filter_size * self.demosaic_filter_size)
+
+            #init_demosaic_filters = demosaic_kernels_null
+
             init_demosaic_filters = demosaic_kernels_null
+            
             self.demosaic_filters = tf.Variable(init_demosaic_filters)
             self.image_training_vars.append(self.demosaic_filters)
 
@@ -132,7 +141,7 @@ class TensoRezModel(tf.keras.Model):
                 # since images weren't centered, can't do our own centering or we may shift it by more than psf can account for.
                 # so just upscale them all and average... not sure if it helps to upscale before the average, but it can't hurt...
                 upscaled_images = tf.image.resize(observed_images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
-                average_image = tf.reduce_mean(upscaled_images, axis = 0)
+                average_image = tf.reduce_mean(upscaled_images, axis = 0, keepdims = True)
         else:
             average_image = tf.reduce_mean(observed_images, axis = 0, keepdims = True)
         tf.assign(self.estimated_image, average_image)
