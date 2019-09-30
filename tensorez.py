@@ -14,6 +14,7 @@ import tensorflow as tf
 import os
 import glob
 import datetime
+import time
 from tensorez.model import *
 from tensorez.util import *
 
@@ -38,7 +39,8 @@ super_resolution_factor = 2
 #
 # Certain sizes, like 64, seem much faster - something about GPU wavefronts?
 #
-psf_size = 32 * super_resolution_factor
+psf_size = 64 * super_resolution_factor
+
 
 
 # If true, we will align the images according to their center of mass.
@@ -95,7 +97,7 @@ training_steps = 1000
 
 # At each step, move along the gradient by this factor - moving to fast will
 # lead to artifacts or instability, and moving too slow will take forever.
-learning_rate = .001
+learning_rate = .0001
 
 
 # With bifurcated training, we alternate between training the PSFs and the image.
@@ -318,12 +320,14 @@ else:
     print("Beginning training...")
 
     all_vars = model.psf_training_vars + model.image_training_vars
-    print("Will train variables: {}".format(map(lambda var: var.name, all_vars)))
+    print("Will train variables: {}".format(list(map((lambda var: var.name), all_vars))))
 
-    optimizer = tf.train.AdamOptimizer(image_learning_rate)
+    print("Learning rate: {}".format(learning_rate))
+    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)    
     for overall_training_step in range(1, training_steps + 1):
-
-        print("Step {}".format(overall_training_step), end = '', flush = True)
+        
+        step_start_time = time.perf_counter()
+        print("Step {} / {},".format(overall_training_step, training_steps), end = '', flush = True)
         
         with tf.GradientTape(watch_accessed_variables = False) as tape:
             for var in all_vars:
@@ -333,7 +337,7 @@ else:
                 
             model(images_for_training)
 
-        print(" loss {}".format(sum(model.losses)), end = '', flush = True)
+        print(" loss {:.5e}".format(sum(model.losses)), end = '', flush = True)
 
         grads = tape.gradient(model.losses, all_vars)
         optimizer.apply_gradients(zip(grads, all_vars))
@@ -341,7 +345,10 @@ else:
         model.apply_psf_physicality_constraints()
         model.apply_image_physicality_constraints()
 
-        print(".")
+        step_elapsed_seconds = time.perf_counter() - step_start_time
+        steps_left = training_steps - overall_training_step
+        seconds_left = steps_left * step_elapsed_seconds       
+        print(", step took {:.2f} seconds, done in {}".format(step_elapsed_seconds, datetime.timedelta(seconds = round(seconds_left))))
 
         if overall_training_step < 10 or overall_training_step % 10 == 0:
             model.write_psf_debug_images(output_dir, overall_training_step)

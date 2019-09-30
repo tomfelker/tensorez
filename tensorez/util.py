@@ -3,6 +3,7 @@ import tensorflow as tf
 import tensorflow_graphics as tfg
 import fnmatch
 import os
+import math
 
 from tensorez.bayer import *
 
@@ -19,7 +20,31 @@ def map_along_tensor_axis(func, tensor, axis, keepdims = False):
         return tf.stack(list(map(func, tf.unstack(tensor, axis = axis))), axis = axis)
 
 
+# I have no idea why this doesn't seem to come with TensorFlow...
+def gaussian(x, mean = 0, variance = 1):
+    sigma = math.sqrt(variance)
+    return (1.0 / (sigma * math.sqrt(2 * math.pi))) * tf.exp(-0.5 * tf.square((x - mean) / sigma))
+
+def gaussian_psf(size, standard_deviation = .1):    
+    
+    coords = tf.linspace(-0.5, 0.5, size)
+    # for gaussian, really we could just evaluate along the line and multiply, but
+    # this way lets us try other radially-symmetric functions:
+    coords_x = tf.expand_dims(coords, axis = -2)
+    coords_y = tf.expand_dims(coords, axis = -1)
+    coords_r = tf.sqrt(tf.square(coords_x) + tf.square(coords_y))
+    
+    psf = gaussian(coords_r, variance = standard_deviation * standard_deviation)
+    #psf = 0.5 - coords_r
+
+    psf = psf / tf.reduce_sum(psf)
+    psf = tf.expand_dims(psf, axis = -1)
+    return psf
+
+
 def promote_to_three_channels(image):
+    if image.shape.ndims == 2:
+        image = tf.expand_dims(image, axis = -1)
     if image.shape.ndims == 4:
         image = tf.squeeze(image, axis = -4)
     if image.shape[-1] == 1:
@@ -126,10 +151,21 @@ def write_sequential_image(image, path, name, sequence_num, extension = 'png', *
     latest_path = os.path.join(path, name_with_latest)
     
     write_image(image, history_path, **write_image_args)
-    # hard links on windows!  Let's hope it doesn't all come crashing down... but if we do it right, it's atomic and we only wrote the file once.
-    # would be best on linux, where we could link and replace in one atomic step without the temp name, but python doesn't expose this, and windows probably can't do it
-    os.link(history_path, temp_path)
-    os.replace(temp_path, latest_path)    
+    try:
+        # hard links on windows!  Let's hope it doesn't all come crashing down... but if we do it right, it's atomic and we only wrote the file once.
+        # would be best on linux, where we could link and replace in one atomic step without the temp name, but python doesn't expose this, and windows probably can't do it
+        os.link(history_path, temp_path)
+        os.replace(temp_path, latest_path)
+        
+        # and let's copy it up one also...
+        temp_path = os.path.join(path, '..', name_with_sequence)
+        latest_path = os.path.join(path, '..', name_with_latest)
+        os.link(history_path, temp_path)
+        os.replace(temp_path, latest_path)
+    except Exception as e:
+        # sometimes this gets access denied, because windows is lame and its filesystem won't let you be atomic
+        print("Problem when moving files: {}".format(e))
+    
 
 # return an array of which dimensions are x, y, etc., with channels being -1st dim
 def get_spatial_dims(num_spatial_dims = 2):

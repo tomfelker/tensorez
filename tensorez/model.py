@@ -122,11 +122,21 @@ class TensoRezModel(tf.keras.Model):
     def default_point_spread_functions(self):
         psfs_shape = (self.batch_size, self.psf_size, self.psf_size, 1, self.channels)
 
-        print("Using lame random uniform PSF guess")
-        psfs = tf.random.uniform(psfs_shape)
-        psfs = psfs / tf.reduce_sum(psfs, axis = (-4, -3, -1), keepdims = True)
+        #print("Using lame random uniform PSF guess")
+        #psfs = tf.random.uniform(psfs_shape)
+        #psfs = psfs / tf.reduce_sum(psfs, axis = (-4, -3, -1), keepdims = True)
 
+        #print("Using zeros for PSF, to see if it converges")
         #psfs = tf.zeros(psfs_shape)
+
+        # going too small on this seems to kill training, as once it gets a really spiky PSF it can't go back...
+        psf_standard_deviation = .2
+        print("Using gaussian PSF with standard deviation {} for initial guess".format(psf_standard_deviation))
+        psfs = gaussian_psf(self.psf_size, standard_deviation = psf_standard_deviation)
+        psfs = tf.expand_dims(psfs, axis = -2) # pointless dim for convolution
+        psfs = tf.expand_dims(psfs, axis = -5) # batch dim
+        psfs = tf.tile(psfs, [self.batch_size, 1, 1, 1, self.channels])
+        #print("psfs shape: {}".format(psfs.shape))
         
         return psfs
 
@@ -147,6 +157,7 @@ class TensoRezModel(tf.keras.Model):
         self.estimated_image.assign(average_image)
         self.have_initial_estimate = True
 
+    @tf.function
     def predict_observed_images(self):
         
         predicted_observed_images = []
@@ -161,7 +172,7 @@ class TensoRezModel(tf.keras.Model):
             predicted_observed_images = tf.nn.avg_pool2d(predicted_observed_images, ksize = self.super_resolution_factor, strides = self.super_resolution_factor, padding = 'SAME')
 
         if self.model_noise:
-            predicted_observed_images = predicted_observed_images * self.noise_image_scale + tf.random_normal(shape = self.noise_scale.shape) * self.noise_scale + self.noise_bias
+            predicted_observed_images = predicted_observed_images * self.noise_image_scale + tf.random.normal(shape = self.noise_scale.shape) * self.noise_scale + self.noise_bias
 
         if self.model_bayer:
             predicted_observed_images = apply_bayer_filter(predicted_observed_images, self.bayer_filters)
@@ -185,9 +196,26 @@ class TensoRezModel(tf.keras.Model):
 
     def apply_psf_physicality_constraints(self):
         # apply physicality constraints, PSF must be positive and normal
+        # although, this seems to lead to weirdness at the start...
+        # frustratingly, this is the only thing that works
+        # maybe it's important to be able to nerf a frame by having a subnormal PSF?
         self.point_spread_functions.assign(tf.maximum(0, self.point_spread_functions))
+        
         # hmm, why doesn't this help?  maybe it got NaNs when PSFs go to zero with initial training overshoot?
         #self.point_spread_functions.assign(self.point_spread_functions / tf.reduce_sum(self.point_spread_functions, axis = (-4, -3), keepdims = True))
+
+        # try sliding the whole thing up if parts go negative...
+        # but, doesn't work because now if one thing tries to ring negative, the edges get bright and it all goes sideways
+        #psfs = self.point_spread_functions - tf.reduce_min(self.point_spread_functions, axis = (-4, -3), keepdims = True)
+        #sums = tf.reduce_sum(psfs, axis = (-4, -3), keepdims = True)
+        #psfs /= tf.maximum(1e-9, sums)        
+        #self.point_spread_functions.assign(psfs)
+
+        # how about just clamp but also normalize - still nope!
+        #psfs = tf.maximum(0, self.point_spread_functions)
+        #sums = tf.reduce_sum(psfs, axis = (-4, -3), keepdims = True)
+        #psfs /= tf.maximum(1e-9, sums)        
+        #self.point_spread_functions.assign(psfs)
 
     def apply_image_physicality_constraints(self):
         # apply physicality constraints, image must be positive
