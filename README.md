@@ -23,10 +23,10 @@ The model assumes that there is a constant night sky, but each frame of your vid
 
 ## Installation
 
-Not much help here... install a recent Python and a recent TensorFlow. (I'm being cutting edge, and using eager mode).  You will want to use a GPU, unless you want to run things for days at a time.  Then Python -m PIP install the following:
-- tensorflow-graphics
-- pillow
-- pyraw
+Not much help here... install a recent Python and a recent TensorFlow. (I'm being cutting edge, and using eager mode).  You will want to use a GPU, unless you want to run things for days at a time.  
+
+To install the gpu version of tensorflow and tensorflow graphics, run `pip install -U -r requirements.txt`. To install a cpu-only version, run `pip install -U -r requirements_cpu_only.txt`.
+
 
 Then you should be able to just grab this repo, and look at tensorez.py.  It has a bunch of settings you will want to edit, and you can point it at your data.  (I've included some test data, a video of Jupiter.)  Then run it, and watch the pictures appear.
 
