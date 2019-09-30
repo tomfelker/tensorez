@@ -36,8 +36,14 @@ Then you should be able to just grab this repo, and look at tensorez.py.  It has
 
 - Bayer filter processing.  In theory, by modeling the camera's bayer filter, and looking at the raw, un-demosaiced data, we can recover information that would otherwise be lost.  My DSLR has an antialiasing filter that may ruin this, but it may be possible with data from raw CCD sensors.
 
-- Minibatch processing.  Currently all images are loaded at once, and combined with super-resolution, large PSFs, and gradients, this limits processing to a few hundred frames.  By loading and saving the per-frame data, we could process larger datasets.
+- Modeling sensor noise and non-linearities in the camera's ADC.  The test image of Jupiter has a moon which aleady rises above the hot pixels, but I have images of Saturn which should have moons that are not revealed.  Perhaps they could be.  
+
+- Minibatch processing.  Currently all images are loaded at once, and between super-resolution, large PSFs, and gradients, this limits processing to a few hundred frames.  By loading and saving the per-frame data, we could process larger datasets.
+
+- Fourier transforms, instead of large Conv2Ds, and potentially other optimizations.
 
 - Per-frame transforms.  Currently we simply center the images (by center-of-mass) before processing, but if the truth is rotating (such as a video of a satellite pass), each frame should have at least an affine transform.  It would also be nice to have autocorrelation-based alignment.  Spatial-transformer-network seems useful here.
+
+- Spatially variant PSFs.  The PSF isn't exactly the same from one corner of the video to the other, which makes it difficult to process larger objects.  We could have a grid of PSFs, lerping across the frame, to handle this.  Combined with per-frame transforms and alignment, we could also form a large estimate of the sky from smaller cropped frames of video.
 
 
