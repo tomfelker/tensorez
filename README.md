@@ -32,7 +32,9 @@ Then you should be able to just grab this repo, and look at tensorez.py.  It has
 
 ## Future directions
 
-- Bayer filter processing... in theory, by modeling the camera's bayer filter, and looking at the raw, un-demosaiced data, we can recover information that would otherwise be lost.  My DSLR has an antialiasing filter that may ruin this, but it may be possible with data from raw CCD sensors.
+- Synthetic data.  By using the model to produce corrupted images of a known sky, and then trying to rediscover the model's input, we can have an objective metric of quality, determine the importance of various effects, and better tune the training process.  Plus this way I don't have to go outside where it might be cold.
+
+- Bayer filter processing.  In theory, by modeling the camera's bayer filter, and looking at the raw, un-demosaiced data, we can recover information that would otherwise be lost.  My DSLR has an antialiasing filter that may ruin this, but it may be possible with data from raw CCD sensors.
 
 - Minibatch processing.  Currently all images are loaded at once, and combined with super-resolution, large PSFs, and gradients, this limits processing to a few hundred frames.  By loading and saving the per-frame data, we could process larger datasets.
 
