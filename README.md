@@ -28,7 +28,7 @@ Not much help here... install a recent Python and a recent TensorFlow. (I'm bein
 - pillow
 - pyraw
 
-Then you should be able to just grab this repo, and look at tensorez.py.  It has a bunch of settings you will want to edit, and you can point it at your data.  Then run it, and watch the pictures appear.
+Then you should be able to just grab this repo, and look at tensorez.py.  It has a bunch of settings you will want to edit, and you can point it at your data.  (I've included some test data, a video of Jupiter.)  Then run it, and watch the pictures appear.
 
 ## Future directions
 
