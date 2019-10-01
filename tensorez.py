@@ -66,7 +66,7 @@ align_by_center_of_mass = True
 #
 # Still experimental...
 #
-attempt_bayer_processing = True
+attempt_bayer_processing = False
 
 
 # Try to model the ADC curve, in case it's not really sRGB..
@@ -93,7 +93,7 @@ bayer_tile_size = 2
 #
 
 # Quit after this many steps.
-training_steps = 10000
+training_steps = 1000
 
 # At each step, move along the gradient by this factor - moving to fast will
 # lead to artifacts or instability, and moving too slow will take forever.
@@ -132,17 +132,16 @@ crop_offsets = None
 # Uncomment one of these, or add your own:
 #
 
-#file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
+file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
 #file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
 #file_glob = os.path.join('obd', 'data','epsilon_lyrae', '????????.png')
 #file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif'); image_count_limit = 50
-file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512); crop_offsets = (0, 1500); align_by_center_of_mass = False
+#file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512); crop_offsets = (0, 1500); align_by_center_of_mass = False
 #file_glob = os.path.join('data', 'moon_bottom_mvi_6958', '????????.png'); crop = (512, 512); align_by_center_of_mass = False
 
 # Put the data here (and also some images will in the parent, output/latest)
 #
 output_dir = os.path.join("output", "latest", datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
-
 
 #
 # End of settings.
@@ -150,6 +149,18 @@ output_dir = os.path.join("output", "latest", datetime.datetime.now().replace(mi
 ################################################################################
 
 print("TensoRez v0.1")
+
+# Instead of editing the above, you can override in local_settings.py, which will be excluded from git.
+# You, dear user, need not do this.
+using_local_settings = False
+try:
+    from local_settings import *
+    print("Using local_settings.py")
+except ModuleNotFoundError:
+    pass
+
+
+
 
 tf.compat.v1.enable_eager_execution()
 

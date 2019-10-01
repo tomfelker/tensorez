@@ -13,5 +13,8 @@ output/*
 *.zip
 *.pdf
 
-# release the following
+# release some example data
 !data/jupiter_mvi_6906/????????.png
+
+# not releasing this, so I can play with stuff locally and git push with reckless abandon without pointing users at nonexistant data or broken settings
+local_settings.py
