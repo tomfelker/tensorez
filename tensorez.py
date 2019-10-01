@@ -66,7 +66,7 @@ align_by_center_of_mass = True
 #
 # Still experimental...
 #
-attempt_bayer_processing = False
+attempt_bayer_processing = True
 
 
 # Try to model the ADC curve, in case it's not really sRGB..
@@ -93,11 +93,11 @@ bayer_tile_size = 2
 #
 
 # Quit after this many steps.
-training_steps = 1000
+training_steps = 10000
 
 # At each step, move along the gradient by this factor - moving to fast will
 # lead to artifacts or instability, and moving too slow will take forever.
-learning_rate = .0001
+learning_rate = .001
 
 
 # With bifurcated training, we alternate between training the PSFs and the image.
@@ -126,16 +126,20 @@ image_count_limit = None
 # their center.  Some data below may reset this.
 crop = None
 
+# If cropping, you can specify (x, y) offets relative to the center of the image.
+crop_offsets = None
+
 # Uncomment one of these, or add your own:
 #
 
-file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
+#file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
 #file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
 #file_glob = os.path.join('obd', 'data','epsilon_lyrae', '????????.png')
 #file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif'); image_count_limit = 50
-#file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512);
+file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512); crop_offsets = (0, 1500); align_by_center_of_mass = False
+#file_glob = os.path.join('data', 'moon_bottom_mvi_6958', '????????.png'); crop = (512, 512); align_by_center_of_mass = False
 
-# Put the data here.
+# Put the data here (and also some images will in the parent, output/latest)
 #
 output_dir = os.path.join("output", "latest", datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
 
@@ -156,7 +160,7 @@ images_for_initial_estimate = []
 images_for_training = []
 
 for filename in glob.glob(file_glob):
-    image = read_image(filename, to_float = not model_adc, crop = crop, demosaic = True)
+    image = read_image(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = True)
 
     if align_by_center_of_mass:
         image, shift, shift_axis = center_image(image)
@@ -169,7 +173,7 @@ for filename in glob.glob(file_glob):
         attempt_bayer_processing = False
 
     if attempt_bayer_processing:
-        image = read_image(filename, to_float = not model_adc, crop = crop, demosaic = False)
+        image = read_image(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = False)
         if image.shape[-1] == 1:
             if align_by_center_of_mass:
                 print("Also shifted raw image that amount.")

@@ -51,22 +51,24 @@ def promote_to_three_channels(image):
         image = tf.concat([image, image, image], axis = -1)
     return image
 
-def crop_image(image, crop, crop_align):
+def crop_image(image, crop, crop_align, crop_offsets = None):
     if crop is not None:
         width, height = crop
-        x = (image.shape[-2] - width) // 2
-        y = (image.shape[-3] - height) // 2
+        if crop_offsets is None:
+            crop_offsets = (0, 0)
+        x = (image.shape[-2] - width) // 2 + crop_offsets[0]
+        y = (image.shape[-3] - height) // 2 + crop_offsets[1]
         x = (x // crop_align) * crop_align
         y = (y // crop_align) * crop_align
         return image[..., y : y + height, x : x + width, :]
     return image
 
-def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, color_balance = True, demosaic = True):
+def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, color_balance = True, demosaic = True):
     print("Reading", filename)
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
         image = Image.open(filename)        
         image = np.array(image)
-        image = crop_image(image, crop = crop, crop_align = crop_align)
+        image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
     if fnmatch.fnmatch(filename, '*.cr2'):
         # For raw files, we will read them into a full color image, but with the bayer pattern... this way,
         # we can easily handle whatever bayer pattern
@@ -77,7 +79,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
             image = np.copy(raw.raw_image_visible)
             image = tf.expand_dims(image, axis = -1)
             image = tf.expand_dims(image, axis = 0)
-            image = crop_image(image, crop = crop, crop_align = crop_align)
+            image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
             # todo: color balance?
             # todo: black level?
             # todo: curve?
@@ -119,7 +121,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
         image = tf.io.read_file(filename)
         image = tf.io.decode_image(image)
         image = tf.expand_dims(image, axis = -4)
-        image = crop_image(image, crop = crop, crop_align = crop_align)
+        image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
         if to_float:
             image = tf.cast(image, tf.float32) / 255.0
             if srgb_to_linear:
