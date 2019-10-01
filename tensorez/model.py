@@ -67,11 +67,19 @@ class TensoRezModel(tf.keras.Model):
         if self.already_built:
             return
         self.already_built = True
-        
-        (self.batch_size, self.width, self.height, self.channels) = input_shape
-        print("Building model: batch_size {}, width {}, height {}, channels {}".format(self.batch_size, self.width, self.height, self.channels))
 
-        self.estimated_image = tf.Variable(tf.zeros((1, self.width * self.super_resolution_factor, self.height * self.super_resolution_factor, self.channels)), name = "estimated_image")
+        # input vs output is getting weird... really we take no input and generate output, but to avoid complicating the training loop, we're prending we take an input and have an implicit loss...
+        # maybe that isn't worth the mind bending.  todo: fix this
+        
+        (self.batch_size, self.output_width, self.output_height, self.channels) = input_shape
+        print("Building model: batch_size {}, width {}, height {}, channels {}".format(self.batch_size, self.output_width, self.output_height, self.channels))
+
+        # okay this is cool - to avoid issues where padding = 'SAME' causes a cross artifact in the PSF, we actually estimate
+        # a larger image than what we're given - the borders should then learn something that allows the PSF to be optimal for the known parts
+        estimate_width = self.output_width * self.super_resolution_factor + self.psf_size - 1
+        estimate_height = self.output_height * self.super_resolution_factor + self.psf_size - 1
+
+        self.estimated_image = tf.Variable(tf.zeros((1, estimate_width, estimate_height, self.channels)), name = "estimated_image")
         print("estimated_image has shape {}".format(self.estimated_image.shape))
         self.image_training_vars.append(self.estimated_image)
         self.have_initial_estimate = False
@@ -81,7 +89,7 @@ class TensoRezModel(tf.keras.Model):
         self.psf_training_vars.append(self.point_spread_functions)
 
         if self.model_noise:
-            noise_shape = (self.width, self.height, self.channels)
+            noise_shape = (self.output_width, self.output_height, self.channels)
             
             self.noise_bias = tf.Variable(tf.zeros(noise_shape), name = "noise_bias")
             self.noise_scale = tf.Variable(tf.ones(noise_shape) * (1.0 / 256.0), name = "noise_scale")
@@ -147,12 +155,34 @@ class TensoRezModel(tf.keras.Model):
         images = self.apply_adc_function(images)
         if self.super_resolution_factor != 1:
             print("Upscaling by {}".format(self.super_resolution_factor))
-            images = tf.image.resize(images, (self.width * self.super_resolution_factor, self.height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
+            images = tf.image.resize(images, (self.output_width * self.super_resolution_factor, self.output_height * self.super_resolution_factor), method = tf.image.ResizeMethod.BICUBIC)
             if self.realign_center_of_mass:
                 print("Recentering at super-resolution")
                 images = center_images(images, only_even_shifts = False)
         print("Averaging")
         average_image = tf.reduce_mean(images, axis = 0, keepdims = True)
+
+        extra_width = self.estimated_image.shape[-2] - average_image.shape[-2]
+        extra_height = self.estimated_image.shape[-3] - average_image.shape[-3]
+
+        # pretty sure it's okay to shift by non-self.bayer_tile_size-multiples here
+        pad_left = extra_width // 2
+        pad_top = extra_height // 2
+
+        # because our estimated image is oversized to pad the convolution
+        average_image = tf.pad(
+            average_image,
+            paddings = [
+                [0, 0],
+                [pad_top, extra_height - pad_top],
+                [pad_left, extra_width - pad_left],
+                [0, 0]],
+            # reflect is probably best...
+            mode = 'REFLECT'
+
+            # but this is cooler - it takes a long time for the crosses to go away, but you can watch the prediction bleed into the margins
+            #mode = 'CONSTANT', constant_values = tf.reduce_mean(average_image)
+            )                               
         
         self.estimated_image.assign(average_image)
         self.have_initial_estimate = True
@@ -162,7 +192,7 @@ class TensoRezModel(tf.keras.Model):
         
         predicted_observed_images = []
         for example_index in range(0, self.batch_size):            
-            predicted_observed_image = tf.nn.conv2d(self.estimated_image, self.point_spread_functions[example_index, ...], padding = 'SAME')
+            predicted_observed_image = tf.nn.conv2d(self.estimated_image, self.point_spread_functions[example_index, ...], padding = 'VALID')
             predicted_observed_image = tf.squeeze(predicted_observed_image, axis = 0)
             predicted_observed_images.append(predicted_observed_image)
         predicted_observed_images = tf.stack(predicted_observed_images, axis = 0)
@@ -266,7 +296,8 @@ class TensoRezModel(tf.keras.Model):
 
     def write_image_debug_images(self, output_dir, step):        
         write_sequential_image(self.estimated_image, output_dir, "estimated_image", step)
-        write_sequential_image(center_image_per_channel(tf.squeeze(self.estimated_image, axis = 0)), output_dir, "estimated_image_centered", step)
+        if self.realign_center_of_mass:
+            write_sequential_image(center_image_per_channel(tf.squeeze(self.estimated_image, axis = 0)), output_dir, "estimated_image_centered", step)
 
         if self.model_noise:
             write_sequential_image(self.noise_bias, output_dir, "noise_bias", step)
