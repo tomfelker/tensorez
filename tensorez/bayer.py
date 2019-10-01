@@ -19,6 +19,19 @@ def apply_demosaic_filter(bayer_filtered_image, demosaic_kernels):
     bayer_width = demosaic_kernels.shape[-5]
     kernel_height = demosaic_kernels.shape[-4].value
     kernel_width = demosaic_kernels.shape[-3].value
+
+    # using reflect padding is only correct for a kernel size of 2,
+    # and odd-sized demosaic kernels would probably at least require uneven padding
+    assert(bayer_height == 2 and bayer_width == 2)
+    assert(kernel_height % 2 == 1 and kernel_width % 2 == 1)
+    bayer_filtered_image_padded = tf.pad(
+        bayer_filtered_image,
+        paddings = [
+            [0, 0],
+            [kernel_height // 2, kernel_height // 2],
+            [kernel_width // 2, kernel_width // 2],
+            [0, 0]],
+        mode = 'REFLECT')
     
     col_subimages = []
     for tile_y in range(0, bayer_height):
@@ -26,11 +39,11 @@ def apply_demosaic_filter(bayer_filtered_image, demosaic_kernels):
         for tile_x in range(0, bayer_width):
             demosaic_kernel_for_tile_pos = demosaic_kernels[..., tile_y, tile_x, :, :, :, :]
 
+            # todo: as a possible optimization, might be able to use negative explicit pads in conv2d instead of this roll.
             # shift the image, so the strides hit the appropriate pixels, all from the correct part of the tile pattern
-            # also needing to shift by the center of the kernel seems like a tf bug...
-            shifted_image = tf.roll(bayer_filtered_image, shift = (-tile_y + (kernel_height // 2), -tile_x + (kernel_width // 2)), axis = (-3, -2))
+            shifted_image = tf.roll(bayer_filtered_image_padded, shift = (-tile_y, -tile_x), axis = (-3, -2))
             
-            subimage_for_tile_pos = tf.nn.conv2d(shifted_image, demosaic_kernel_for_tile_pos, strides = (bayer_height, bayer_width), padding = 'SAME')
+            subimage_for_tile_pos = tf.nn.conv2d(shifted_image, demosaic_kernel_for_tile_pos, strides = (bayer_height, bayer_width), padding = 'VALID')
             
             # and now for a bunch of voodoo magic with indices to recombine this monstrosity...
             row_subimages.append(subimage_for_tile_pos)
