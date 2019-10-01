@@ -1,0 +1,5 @@
+numpy
+tensorflow
+tensorflow-graphics
+Pillow
+rawpy
