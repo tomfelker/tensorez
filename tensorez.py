@@ -15,6 +15,8 @@ import os
 import glob
 import datetime
 import time
+import tee
+import sys
 from tensorez.model import *
 from tensorez.util import *
 
@@ -147,6 +149,15 @@ output_dir = os.path.join("output", "latest", datetime.datetime.now().replace(mi
 # End of settings.
 #
 ################################################################################
+
+os.makedirs(output_dir, exist_ok = True)
+try:    
+    import tee    
+    tee.StdoutTee(os.path.join(output_dir, 'log.txt'), buff = 1).__enter__()
+    sys.stderr = sys.stdout
+except ModuleNotFoundError:
+    print("Warning: to generate log.txt, need to install tee.")
+    pass
 
 print("TensoRez v0.1")
 
