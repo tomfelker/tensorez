@@ -3,3 +3,4 @@ tensorflow
 tensorflow-graphics
 Pillow
 rawpy
+stn
