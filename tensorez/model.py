@@ -192,14 +192,14 @@ class TensoRezModel(tf.keras.Model):
         
         predicted_observed_images = []
         for example_index in range(0, self.batch_size):            
-            predicted_observed_image = tf.nn.conv2d(self.estimated_image, self.point_spread_functions[example_index, ...], padding = 'VALID')
+            predicted_observed_image = tf.nn.conv2d(self.estimated_image, self.point_spread_functions[example_index, ...], strides = self.super_resolution_factor, padding = 'VALID')
             predicted_observed_image = tf.squeeze(predicted_observed_image, axis = 0)
             predicted_observed_images.append(predicted_observed_image)
         predicted_observed_images = tf.stack(predicted_observed_images, axis = 0)
 
-        if self.super_resolution_factor != 1:
+        #if self.super_resolution_factor != 1:
             #todo: should I instead just stride the above convolution?  might be equivalent...
-            predicted_observed_images = tf.nn.avg_pool2d(predicted_observed_images, ksize = self.super_resolution_factor, strides = self.super_resolution_factor, padding = 'SAME')
+            #predicted_observed_images = tf.nn.avg_pool2d(predicted_observed_images, ksize = self.super_resolution_factor, strides = self.super_resolution_factor, padding = 'SAME')
 
         if self.model_noise:
             predicted_observed_images = predicted_observed_images * self.noise_image_scale + tf.random.normal(shape = self.noise_scale.shape) * self.noise_scale + self.noise_bias
@@ -229,7 +229,13 @@ class TensoRezModel(tf.keras.Model):
         # although, this seems to lead to weirdness at the start...
         # frustratingly, this is the only thing that works
         # maybe it's important to be able to nerf a frame by having a subnormal PSF?
+
+#        print("PSFs before clamp: {}".format(tf.reduce_sum(self.point_spread_functions, axis = (-4, -3), keepdims = True)))
+        
         self.point_spread_functions.assign(tf.maximum(0, self.point_spread_functions))
+        
+        # when training, sum of PSFs seems to hover near 1.06... I guess the 'true' psf is larger than the kernel?
+        # so if you push it down to 1, you always get gradients saying "make the whole thing bigger"
         
         # hmm, why doesn't this help?  maybe it got NaNs when PSFs go to zero with initial training overshoot?
         #self.point_spread_functions.assign(self.point_spread_functions / tf.reduce_sum(self.point_spread_functions, axis = (-4, -3), keepdims = True))
@@ -244,8 +250,22 @@ class TensoRezModel(tf.keras.Model):
         # how about just clamp but also normalize - still nope!
         #psfs = tf.maximum(0, self.point_spread_functions)
         #sums = tf.reduce_sum(psfs, axis = (-4, -3), keepdims = True)
-        #psfs /= tf.maximum(1e-9, sums)        
+        # and maybe it's fine for individual PSFs to be lower or higher, as long as they on average are unit sum
+        #sums = tf.reduce_mean(sums, axis = (-5), keepdims = True)        
+        #psfs /= tf.minimum(.9, tf.maximum(1e-9, sums))
         #self.point_spread_functions.assign(psfs)
+
+ #       print("PSFs after clamp: {}".format(tf.reduce_sum(self.point_spread_functions, axis = (-4, -3), keepdims = True)))
+
+
+        # theory about helvetica...
+        # because real PSF is bigger than kernel, initial solution would have PSFs sum to 1.1 or so,
+        # thus, initial gradients make it shoot up, oscillate down, and often die to zero,
+        # but the structure of the problem, where initial image guess is too blurry, means that it finds the steady state
+        # where PSF estimates are shrinking, and it's approaching the real PSF from above
+        # but once it gets there, and the PSF sum is too low - suddenly the gradients for every pixel in the PSF are positive
+        # and where before it's been banging against the positivity constraint, now every pixel can go up
+        # and so it starts oscillating again
 
     def apply_image_physicality_constraints(self):
         # apply physicality constraints, image must be positive
