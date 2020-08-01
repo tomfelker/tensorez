@@ -17,8 +17,8 @@ def apply_bayer_filter(image, bayer_filter_tile):
 def apply_demosaic_filter(bayer_filtered_image, demosaic_kernels):
     bayer_height = demosaic_kernels.shape[-6]
     bayer_width = demosaic_kernels.shape[-5]
-    kernel_height = demosaic_kernels.shape[-4].value
-    kernel_width = demosaic_kernels.shape[-3].value
+    kernel_height = demosaic_kernels.shape[-4]
+    kernel_width = demosaic_kernels.shape[-3]
 
     # using reflect padding is only correct for a kernel size of 2,
     # and odd-sized demosaic kernels would probably at least require uneven padding

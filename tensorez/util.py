@@ -5,6 +5,8 @@ import fnmatch
 import os
 import math
 
+#from tensorez.ser_format import *
+import tensorez.ser_format as ser_format
 from tensorez.bayer import *
 
 from PIL import Image
@@ -63,13 +65,13 @@ def crop_image(image, crop, crop_align, crop_offsets = None):
         return image[..., y : y + height, x : x + width, :]
     return image
 
-def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, color_balance = True, demosaic = True):
-    print("Reading", filename)
+def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, color_balance = True, demosaic = True, frame_index = None):
+    print("Reading", filename, "frame " + str(frame_index) if frame_index is not None else "")
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
         image = Image.open(filename)        
         image = np.array(image)
-        image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
-    if fnmatch.fnmatch(filename, '*.cr2'):
+
+    elif fnmatch.fnmatch(filename, '*.cr2'):
         # For raw files, we will read them into a full color image, but with the bayer pattern... this way,
         # we can easily handle whatever bayer pattern
 
@@ -79,7 +81,6 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
             image = np.copy(raw.raw_image_visible)
             image = tf.expand_dims(image, axis = -1)
             image = tf.expand_dims(image, axis = 0)
-            image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
             # todo: color balance?
             # todo: black level?
             # todo: curve?
@@ -113,20 +114,47 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
 
                     image = (image - black) * scale
 
-                if demosaic:
-                    image = apply_demosaic_filter(image, demosaic_kernels_rggb)
-
-                           
+    elif fnmatch.fnmatch(filename, '*.ser'):
+        image = ser_format.read_frame(filename, frame_index = frame_index, to_float = to_float)   
+        if to_float:
+            image = tf.convert_to_tensor(image, dtype = tf.float32)            
     else:
         image = tf.io.read_file(filename)
         image = tf.io.decode_image(image)
         image = tf.expand_dims(image, axis = -4)
-        image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
         if to_float:
             image = tf.cast(image, tf.float32) / 255.0
             if srgb_to_linear:
                 image = tfg.image.color_space.linear_rgb.from_srgb(image)
+
+    image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
+
+    if demosaic:
+        image = apply_demosaic_filter(image, demosaic_kernels_rggb)
+        
     return image
+
+class ImageSequenceReader:
+    def __init__(self, filename, **kwargs):
+        self.filename = filename
+        self.kwargs = kwargs
+
+    def __iter__(self):
+        self.current_frame_index = 0
+        self.num_frames = 1
+        if fnmatch.fnmatch(self.filename, '*.ser'):
+            ser_header = ser_format.read_ser_header(self.filename)
+            self.num_frames = ser_header.frame_count
+        return self
+
+    def __next__(self):
+        if self.current_frame_index >= self.num_frames:
+            raise StopIteration
+        image = read_image(self.filename, frame_index = self.current_frame_index, **self.kwargs)
+        self.current_frame_index += 1
+        return image
+
+
 
 def write_image(image, filename, normalize = False, saturate = True):
     print("Writing", filename)
@@ -198,7 +226,7 @@ def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True):
         #print("Evaluating CoM in dim", dim)
         dim_size = image.shape[dim]
         #print("which is of size", dim_size)
-        multiplier = tf.linspace(-dim_size.value / 2.0, dim_size.value / 2.0, dim_size)
+        multiplier = tf.linspace(-dim_size / 2.0, dim_size / 2.0, dim_size)
 
         multiplier_shape = []
         for sum_dim in range(0, tf.rank(image)):

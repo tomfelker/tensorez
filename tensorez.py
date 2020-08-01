@@ -17,6 +17,7 @@ import datetime
 import time
 import tee
 import sys
+import fnmatch
 from tensorez.model import *
 from tensorez.util import *
 
@@ -99,7 +100,7 @@ training_steps = 1000
 
 # At each step, move along the gradient by this factor - moving to fast will
 # lead to artifacts or instability, and moving too slow will take forever.
-learning_rate = .001
+learning_rate = .0001
 
 
 # With bifurcated training, we alternate between training the PSFs and the image.
@@ -134,12 +135,14 @@ crop_offsets = None
 # Uncomment one of these, or add your own:
 #
 
-file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
+#file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
 #file_glob = os.path.join('data', 'saturn_bright_mvi_6902', '????????.png')
 #file_glob = os.path.join('obd', 'data','epsilon_lyrae', '????????.png')
 #file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif'); image_count_limit = 50
 #file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512); crop_offsets = (0, 1500); align_by_center_of_mass = False
 #file_glob = os.path.join('data', 'moon_bottom_mvi_6958', '????????.png'); crop = (512, 512); align_by_center_of_mass = False
+file_glob = os.path.join('data', 'ser_player_examples', 'Jup_200415_204534_R_F0001-0300.ser'); image_count_limit = 10
+#file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-07-30Z', '2020-07-30-2020_6-CapObj.SER'); image_count_limit = 10; align_by_center_of_mass = False; super_resolution_factor = 1;attempt_bayer_processing = False
 
 # Put the data here (and also some images will in the parent, output/latest)
 #
@@ -182,35 +185,38 @@ images_for_initial_estimate = []
 images_for_training = []
 
 for filename in glob.glob(file_glob):
-    image = read_image(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = True)
+    for image in ImageSequenceReader(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = True):
 
-    if align_by_center_of_mass:
-        image, shift, shift_axis = center_image(image)
-        print("Aligning by center of mass, shifted image by {}".format(shift))
-    
-    images_for_initial_estimate.append(image)
+        if align_by_center_of_mass:
+            image, shift, shift_axis = center_image(image)
+            print("Aligning by center of mass, shifted image by {}".format(shift))
+        
+        images_for_initial_estimate.append(image)
 
-    if attempt_bayer_processing and image.shape[-1] == 1:
-        print("Warning: Not doing Bayer processing because we got a monochrome image.")
-        attempt_bayer_processing = False
-
-    if attempt_bayer_processing:
-        image = read_image(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = False)
-        if image.shape[-1] == 1:
-            if align_by_center_of_mass:
-                print("Also shifted raw image that amount.")
-                image = tf.roll(image, shift = shift, axis = shift_axis)
-            
-            images_for_training.append(image)
-        else:                
-            print("Warning: Not doing bayer processing because we couldn't get a non-demosaiced raw file.")
+        if attempt_bayer_processing and image.shape[-1] == 1:
+            print("Warning: Not doing Bayer processing because we got a monochrome image.")
             attempt_bayer_processing = False
+
+        if attempt_bayer_processing:
+            image = read_image(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = False)
+            if image.shape[-1] == 1:
+                if align_by_center_of_mass:
+                    print("Also shifted raw image that amount.")
+                    image = tf.roll(image, shift = shift, axis = shift_axis)
+                
+                images_for_training.append(image)
+            else:                
+                print("Warning: Not doing bayer processing because we couldn't get a non-demosaiced raw file.")
+                attempt_bayer_processing = False
+        
+        num_images += 1
+        if num_images == image_count_limit:
+            print("Stopping after {} images (image_count_limit).".format(image_count_limit))
+            break
     
-    num_images += 1
-    if num_images == image_count_limit:
-        print("Stopping after {} images (image_count_limit).".format(image_count_limit))
-        break
-    
+if num_images == 0:
+    raise RuntimeError(f"Could not find any images matching {file_glob}")
+
 images_for_initial_estimate = tf.concat(images_for_initial_estimate, axis = -4)
 if attempt_bayer_processing:    
     images_for_training = tf.concat(images_for_training, axis = -4)
