@@ -1,12 +1,15 @@
 data/**/*.png
 data/**/*.mov
 data/**/*.avi
+data/**/*.avi.txt
 data/**/*.gif
 data/**/*.tif
 data/**/*.tiff
 data/**/*.jpg
 data/**/*.jpeg
 data/**/*.cr2
+data/**/*.ser
+data/**/*.ser.txt
 obd/**
 output/*
 **/__pycache__/*
