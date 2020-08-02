@@ -187,7 +187,7 @@ class TensoRezModel(tf.keras.Model):
         self.estimated_image.assign(average_image)
         self.have_initial_estimate = True
 
-    @tf.function
+    #@tf.function
     def predict_observed_images(self):
         
         predicted_observed_images = []
@@ -220,7 +220,7 @@ class TensoRezModel(tf.keras.Model):
         predicted_observed_images = self.predict_observed_images()
         
         # saturating to 1 here intentionally kills gradients in the saturated parts, so we're not penalized
-        predicted_observed_images = tf.minimum(1.0, predicted_observed_images)
+        #predicted_observed_images = tf.minimum(1.0, predicted_observed_images)
 
         self.add_loss(tf.compat.v1.losses.mean_squared_error(observed_images, predicted_observed_images))
 
@@ -232,8 +232,8 @@ class TensoRezModel(tf.keras.Model):
 
 #        print("PSFs before clamp: {}".format(tf.reduce_sum(self.point_spread_functions, axis = (-4, -3), keepdims = True)))
         
-        self.point_spread_functions.assign(tf.maximum(0, self.point_spread_functions))
-        
+      #  self.point_spread_functions.assign(tf.maximum(0, self.point_spread_functions))
+        pass
         # when training, sum of PSFs seems to hover near 1.06... I guess the 'true' psf is larger than the kernel?
         # so if you push it down to 1, you always get gradients saying "make the whole thing bigger"
         

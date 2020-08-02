@@ -29,7 +29,6 @@ def read_ser_header(filename):
         header = SerHeader._make(header_format.unpack(file.read(header_format.size)))
         return header
 
-# returns header, data, where data has shape [frames, width, height, channel]
 def read_frame(filename, frame_index, to_float = True):
     with open(filename, "rb") as file:
         header = SerHeader._make(header_format.unpack(file.read(header_format.size)))
@@ -65,7 +64,7 @@ def read_frame(filename, frame_index, to_float = True):
         max_val = 1 << max(header.pixel_depth_per_plane, 8)
         frame = frame * (1 / max_val)
 
-    return frame
+    return frame, header
 
 if __name__ == '__main__':
     #read_frame(os.path.join("data", "ser_player_examples", "Jup_200415_204534_R_F0001-0300.ser"), 0)

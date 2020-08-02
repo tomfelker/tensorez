@@ -53,19 +53,25 @@ def promote_to_three_channels(image):
         image = tf.concat([image, image, image], axis = -1)
     return image
 
-def crop_image(image, crop, crop_align, crop_offsets = None):
+def crop_image(image, crop, crop_align, crop_offsets = None, crop_center = None):
     if crop is not None:
         width, height = crop
-        if crop_offsets is None:
-            crop_offsets = (0, 0)
-        x = (image.shape[-2] - width) // 2 + crop_offsets[0]
-        y = (image.shape[-3] - height) // 2 + crop_offsets[1]
+        if crop_center is not None:
+            x = crop_center[0] - width // 2
+            y = crop_center[1] - height // 2
+        else:
+            if crop_offsets is None:
+                crop_offsets = (0, 0)
+            x = (image.shape[-2] - width) // 2 + crop_offsets[0]
+            y = (image.shape[-3] - height) // 2 + crop_offsets[1]
+        
+        # round so as not to mess up the bayer pattern
         x = (x // crop_align) * crop_align
         y = (y // crop_align) * crop_align
         return image[..., y : y + height, x : x + width, :]
     return image
 
-def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, color_balance = True, demosaic = True, frame_index = None):
+def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, crop_center = None, color_balance = True, demosaic = True, frame_index = None):
     print("Reading", filename, "frame " + str(frame_index) if frame_index is not None else "")
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
         image = Image.open(filename)        
@@ -114,8 +120,21 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
 
                     image = (image - black) * scale
 
+                if demosaic:
+                    image = apply_demosaic_filter(image, demosaic_kernels_rggb)
+
     elif fnmatch.fnmatch(filename, '*.ser'):
-        image = ser_format.read_frame(filename, frame_index = frame_index, to_float = to_float)   
+        image, header = ser_format.read_frame(filename, frame_index = frame_index, to_float = to_float)
+        if demosaic:
+            if header.color_id == ser_format.ColorId.MONO:
+                #print("debayering when we shouldn't, lest code below crashes?")
+                #image = apply_demosaic_filter(image, demosaic_kernels_rggb)
+                pass
+            elif header.color_id == ser_format.ColorId.BAYER_RGGB:
+                image = apply_demosaic_filter(image, demosaic_kernels_rggb)
+            else:
+                raise RuntimeError(f"SER file {filename} has unrecognized bayer pattern {header.color_id}")
+
         if to_float:
             image = tf.convert_to_tensor(image, dtype = tf.float32)            
     else:
@@ -127,10 +146,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
             if srgb_to_linear:
                 image = tfg.image.color_space.linear_rgb.from_srgb(image)
 
-    image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets)
-
-    if demosaic:
-        image = apply_demosaic_filter(image, demosaic_kernels_rggb)
+    image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets, crop_center = crop_center)
         
     return image
 

@@ -105,8 +105,8 @@ learning_rate = .0001
 
 # With bifurcated training, we alternate between training the PSFs and the image.
 # I don't think this is necessary, and will remove it pending more experiments.
-bifurcated_training = False
-psf_training_steps = 10
+bifurcated_training = True
+psf_training_steps = 100
 psf_learning_rate = .001
 image_training_steps = 10
 image_learning_rate = .001
@@ -141,7 +141,7 @@ crop_offsets = None
 #file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif'); image_count_limit = 50
 #file_glob = os.path.join('data', 'powerline_t4i_raw', '*.cr2'); crop = (512, 512); crop_offsets = (0, 1500); align_by_center_of_mass = False
 #file_glob = os.path.join('data', 'moon_bottom_mvi_6958', '????????.png'); crop = (512, 512); align_by_center_of_mass = False
-file_glob = os.path.join('data', 'ser_player_examples', 'Jup_200415_204534_R_F0001-0300.ser'); image_count_limit = 10
+file_glob = os.path.join('data', 'ser_player_examples', 'Jup_200415_204534_R_F0001-0300.ser'); image_count_limit = 25; super_resolution_factor = 1
 #file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-07-30Z', '2020-07-30-2020_6-CapObj.SER'); image_count_limit = 10; align_by_center_of_mass = False; super_resolution_factor = 1;attempt_bayer_processing = False
 
 # Put the data here (and also some images will in the parent, output/latest)
@@ -186,7 +186,6 @@ images_for_training = []
 
 for filename in glob.glob(file_glob):
     for image in ImageSequenceReader(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = True):
-
         if align_by_center_of_mass:
             image, shift, shift_axis = center_image(image)
             print("Aligning by center of mass, shifted image by {}".format(shift))
@@ -231,59 +230,7 @@ def reduce_image_to_tile(image, tile_size):
     image = tf.reduce_mean(tf.stack(slices, axis = 0), axis = 0)
     slices = tf.split(image, num_or_size_splits = image.shape[-2] // tile_size, axis = -2)
     image = tf.reduce_mean(tf.stack(slices, axis = 0), axis = 0)
-    return image    
-
-# This probably doesn't work...
-if model_demosaic and images_were_overcentered:
-    # we need to re-align them to the bayer tile size
-
-    max_align_steps = 5
-
-    steps_with_no_shifts = 0
-    for align_step in range(0, max_align_steps):
-        print("Bayer aligning images, step {}".format(align_step))
-    
-        #average_image = tf.reduce_sum(images, axis = 0)
-        average_image = images[0]
-        average_tile = reduce_image_to_tile(average_image, tile_size = bayer_tile_size)
-
-        write_image(average_tile, os.path.join(output_dir, 'aligned_images', 'average_tile_step{:08}.png'.format(align_step)), normalize = True)
-
-        aligned_images = []
-        any_nonzero_shifts = False
-        for image in tf.unstack(images, axis = 0):
-            best_alignment = None
-            best_x_shift = None
-            best_y_shift = None
-
-            image_tile = reduce_image_to_tile(image, tile_size = bayer_tile_size)
-
-            for y_shift in range(0, bayer_tile_size):
-                for x_shift in range(0, bayer_tile_size):
-                    shifted_tile = tf.roll(image_tile, shift = (y_shift, x_shift), axis = (-3, -2))
-                    alignment = tf.compat.v1.losses.mean_squared_error(average_tile, shifted_tile)
-                    if best_alignment is None or alignment < best_alignment:
-                        best_alignment = alignment
-                        best_x_shift = x_shift
-                        best_y_shift = y_shift
-
-            if best_x_shift is not 0 and best_y_shift is not 0:
-                any_nonzero_shifts = True                
-            aligned_images.append(tf.roll(image, shift = (best_y_shift, best_x_shift), axis = (-3, -2)))
-        images = tf.stack(aligned_images, axis = 0)
-        if not any_nonzero_shifts:
-            steps_with_no_shifts += 1
-            if steps_with_no_shifts >= 2:
-                print("Alignment converged!")
-                break
-    if any_nonzero_shifts:
-        print("Warning: image bayer alignment didn't converge")
-    write_aligned_images = True
-    if write_aligned_images:
-        for image_index, image in enumerate(tf.unstack(images, axis = 0)):
-            write_image(image, os.path.join(output_dir, 'aligned_images', 'image_{:08}.png'.format(image_index)))
-        
-
+    return image
 
 model = TensoRezModel(
     psf_size = psf_size,
