@@ -1,0 +1,45 @@
+Explorations log
+
+kinda seems to work, but convergence is really slow...
+
+also, want to try with longer videos, which suggests that need a streaming solution, as these gradients are too big,
+can't fit more than like 50 frames on even my sweetest gpu
+
+one exploration so far was taking 'true' images and PSFs (that i actually captured with a camera)
+and convolving them to generate fake images
+
+then, tried to see if it's possible to learn only the PSFs, given the true image and convolved image
+
+that did work very well, took a few hundred steps with Adam and .0001 learning rate and clipping to positive
+when allowed the PSFs to go negative, larger artifacts appeared, and while they mostly went away, the left some traces
+
+but this still shows some problems with training:
+    - way too slow, need .0001, .001 is unstable
+    - even with that, sometimes, the entire backgrounds get bright - what's up with that?
+    - weird momentum stuff?
+        theory - for variables that get clipped to zero, maybe their momentum stays negative, preventing them from bouncing back if necessary?
+        which suggests should just have a loss for negative values?
+            - that didn't help, just led to weird artifacting of the black areas
+
+another interesting question: that proves we can get the data back with perfect knowledge of the true sky
+but how about with averaged knowledge?
+    - interesting thing here is, suppose every frame has a nice round perfect PSF, and then you're the one PSF that has a bit out or something
+        so the estimate of the truth is too fuzzy, but similarly fuzzy as most of the observations
+        thus most of the observations' PSFs, if trained, will become overly sharp (which of course means its important not to get stuck at zero)
+        but what if you're the one frame that was had perfect seeing?  so everything else, on average,
+        is saying "fuzzy sky * dirac delta = fuzzy image", and you're saying, fuzzy sky * ?? = sharp image 
+            problem is, there is such a thing as a sharpen filter... but it has negative coefficients
+
+
+
+
+pingpong training:
+    - load every image, average them
+    - solve alignment of each vs average (this is its own loop)
+    - load every image, shift, average
+    - loop:
+        load one image at a time, solve PSF very hard against that observations
+            save the PSF (probably without momenta?)
+        now, in batches, solve the images against the PSF batches
+            batches as large as possible in GPU memory, batches are to prevent overfitting
+        

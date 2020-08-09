@@ -61,8 +61,8 @@ def read_frame(filename, frame_index, to_float = True):
 
     if to_float:
         frame = frame.astype(np.float32)
-        max_val = 1 << max(header.pixel_depth_per_plane, 8)
-        frame = frame * (1 / max_val)
+        max_val = (1 << max(header.pixel_depth_per_plane, 8)) - 1
+        frame = frame / max_val
 
     return frame, header
 

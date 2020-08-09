@@ -223,6 +223,12 @@ class TensoRezModel(tf.keras.Model):
         #predicted_observed_images = tf.minimum(1.0, predicted_observed_images)
 
         self.add_loss(tf.compat.v1.losses.mean_squared_error(observed_images, predicted_observed_images))
+        
+        #todo: may need to also split losses between psf and image, because only PSF training cares about this:
+        if False:
+            negative_value_penalty = 10
+            self.add_loss((-negative_value_penalty) * tf.reduce_mean(tf.minimum(0, self.point_spread_functions)))
+
 
     def apply_psf_physicality_constraints(self):
         # apply physicality constraints, PSF must be positive and normal
@@ -232,8 +238,8 @@ class TensoRezModel(tf.keras.Model):
 
 #        print("PSFs before clamp: {}".format(tf.reduce_sum(self.point_spread_functions, axis = (-4, -3), keepdims = True)))
         
-      #  self.point_spread_functions.assign(tf.maximum(0, self.point_spread_functions))
-        pass
+        if True:
+            self.point_spread_functions.assign(tf.maximum(0, self.point_spread_functions))
         # when training, sum of PSFs seems to hover near 1.06... I guess the 'true' psf is larger than the kernel?
         # so if you push it down to 1, you always get gradients saying "make the whole thing bigger"
         
