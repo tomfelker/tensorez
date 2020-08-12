@@ -107,10 +107,12 @@ if True:
     write_image(reconstructed_psf[0,...], os.path.join(output_path, "psf_guess_from_true.png"), normalize = True)
 
     reconstructed_psf = solve_for_psf(observation, guess = synthetic_images_mean, psf_size= psf_size)
+    reconstructed_psf_unclamped = solve_for_psf(observation, guess = synthetic_images_mean, psf_size= psf_size, clamp = False)
     rms_from_true_psf = tf.reduce_mean(tf.math.square(tf.squeeze(true_psfs[0,...]) - tf.squeeze(reconstructed_psf)))
     print(f'PSF reconstructed with RMS error {rms_from_true_psf}')
     write_image(reconstructed_psf[0,...], os.path.join(output_path, "psf_guess_from_mean.png"), normalize = True)
 
+    
 
 if False:
     model = init_and_jam_into_model(true_image, reconstructed_psf)

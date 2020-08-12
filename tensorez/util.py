@@ -317,6 +317,22 @@ def center_images(images, **kwargs):
     print("centering images, shape {}".format(images.shape))
     return map_along_tensor_axis((lambda image: center_image(image, **kwargs)[0]), images, 0)
 
-    
+def hwc_to_chw(t):
+    rank = tf.rank(t)
+    perm = list(range(0, rank))
+    perm[-3] = rank - 1
+    perm[-2] = rank - 3
+    perm[-1] = rank - 2
+    return tf.transpose(t, perm = perm)
 
-    
+def chw_to_hwc(t):
+    rank = tf.rank(t)
+    perm = list(range(0, rank))
+    perm[-3] = rank - 2
+    perm[-2] = rank - 1
+    perm[-1] = rank - 3
+    return tf.transpose(t, perm = perm)
+
+def real_to_complex(t):
+    return tf.complex(t, tf.cast(0, t.dtype))
+
