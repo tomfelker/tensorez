@@ -30,7 +30,7 @@ from tensorez.fourier import *
 
 # corresponds to obd()
 # returns estimated_image, estimated_psf
-def obd_step(estimated_image, observed_image, psf_shape, clip = 255/256, psf_iterations = 40, estimated_image_iterations = 1):
+def obd_step(estimated_image, observed_image, psf_shape, clip = 255/256, psf_iterations = 500, estimated_image_iterations = 1):
     
     # solve (as accurately as possible) for the best all-positive-valued estimated_psf
     # to minimize the difference between
@@ -48,16 +48,16 @@ def obd_step(estimated_image, observed_image, psf_shape, clip = 255/256, psf_ite
 
     estimated_psf = obd_update(estimated_psf, estimated_image, observed_image, iterations = psf_iterations, clip = clip)
 
-    sum_estimated_psf = tf.reduce_sum(estimated_psf)
+    sum_estimated_psf = tf.reduce_sum(estimated_psf, axis = (-2, -1), keepdims = True)
     estimated_psf *= 1 / sum_estimated_psf
     #not sure why we do this:
     estimated_image *= sum_estimated_psf
 
-    estimated_image = obd_update(estimated_image, estimated_psf, observed_image, iterations = estimated_image_iterations, clip = clip)
+    estimated_image = obd_update(estimated_image, estimated_psf, observed_image, iterations = estimated_image_iterations, clip = clip, update_power = .1)
 
-    return estimated_image
+    return estimated_image, estimated_psf
 
-def obd_update(f, x, y, iterations, clip):
+def obd_update(f, x, y, iterations, clip, update_power = None):
     m = tf.cast(y < clip, y.dtype)
     y = tf.multiply(y, m)
     for i in range(0, iterations):
@@ -67,6 +67,11 @@ def obd_update(f, x, y, iterations, clip):
         denom = tf.math.maximum(0, conv2d_transpose_fourier(x, ytmp))
         tol = 1e-10
         factor = (nom + tol) / (denom + tol)
+
+        # just a thought, maybe we're still learning too fast
+        if update_power is not None:
+            factor = tf.math.pow(factor, update_power)
+
         f = tf.math.multiply(f, factor)
     return f
 

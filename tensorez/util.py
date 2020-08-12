@@ -175,7 +175,9 @@ class ImageSequenceReader:
 def write_image(image, filename, normalize = False, saturate = True):
     print("Writing", filename)
     if normalize:
-        image = image / tf.reduce_max(image)
+        max_val = tf.reduce_max(image)
+        print(f'max was {max_val.numpy()}, normalizing') 
+        image = image / max_val
     if saturate:
         image = tf.minimum(1.0, image)
     image = promote_to_three_channels(image)
