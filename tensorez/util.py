@@ -76,6 +76,11 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
         image = Image.open(filename)        
         image = np.array(image)
+        if to_float:
+            image = tf.cast(image, tf.float32) / 255.0
+            image = tf.expand_dims(image, axis = -4)
+            if srgb_to_linear:
+                image = tfg.image.color_space.linear_rgb.from_srgb(image)
 
     elif fnmatch.fnmatch(filename, '*.cr2'):
         # For raw files, we will read them into a full color image, but with the bayer pattern... this way,
@@ -151,12 +156,13 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
     return image
 
 class ImageSequenceReader:
-    def __init__(self, filename, **kwargs):
+    def __init__(self, filename, skip = 0, **kwargs):
         self.filename = filename
         self.kwargs = kwargs
+        self.skip = skip
 
     def __iter__(self):
-        self.current_frame_index = 0
+        self.current_frame_index = self.skip
         self.num_frames = 1
         if fnmatch.fnmatch(self.filename, '*.ser'):
             ser_header = ser_format.read_ser_header(self.filename)
@@ -222,7 +228,7 @@ def get_spatial_dims(num_spatial_dims = 2):
         spatial_dims.append(-2 - spatial_dim_index)
     return spatial_dims
 
-def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True):
+def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True, only_above_average = True):
     # todo: fix this - it's too complicated, and doesn't work batchwise...
     if image.shape.ndims == 4:
         image = tf.squeeze(image, axis = -4)
@@ -235,6 +241,10 @@ def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True):
 
     if collapse_channels:
         image = tf.reduce_sum(image, axis = -1, keepdims = True)
+
+    if only_above_average:
+        average = tf.reduce_mean(image, keepdims = False)
+        image = tf.maximum(image - average, 0)
     
     total_mass = tf.reduce_sum(image, axis = spatial_dims, keepdims = True)        
     #print("total_mass:", total_mass)
@@ -242,7 +252,7 @@ def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True):
     ret = None
     for dim in spatial_dims:
         #print("Evaluating CoM in dim", dim)
-        dim_size = image.shape[dim]
+        dim_size = image.shape[dim].value
         #print("which is of size", dim_size)
         multiplier = tf.linspace(-dim_size / 2.0, dim_size / 2.0, dim_size)
 
@@ -338,3 +348,5 @@ def chw_to_hwc(t):
 def real_to_complex(t):
     return tf.complex(t, tf.cast(0, t.dtype))
 
+def signal_fftshift_2d(x):
+    return tf.roll(x, shift = (x.shape[-2] // 2, x.shape[-1] // 2), axis = (-2, -1))

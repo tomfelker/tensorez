@@ -10,11 +10,14 @@ data/**/*.jpeg
 data/**/*.cr2
 data/**/*.ser
 data/**/*.ser.txt
+data/**/*.fit
+data/**/*.txt
 obd/**
 output/*
 **/__pycache__/*
 *.zip
 *.pdf
+
 
 # release some example data
 !data/jupiter_mvi_6906/????????.png

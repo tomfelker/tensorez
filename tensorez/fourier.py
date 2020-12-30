@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 
 def pad_for_conv(t, psf_size):
-    return tf.pad(t, ((0, 0), ((psf_size - 1) // 2, (psf_size + 1) // 2), ((psf_size - 1) // 2, (psf_size + 1) // 2), (0, 0)), mode = 'REFLECT')
+    return tf.pad(t, ((0, 0), ((psf_size - 1) // 2, (psf_size) // 2), ((psf_size - 1) // 2, (psf_size) // 2), (0, 0)), mode = 'REFLECT')
 
 def unpad_for_conv(t, psf_size):
     half_size = psf_size // 2

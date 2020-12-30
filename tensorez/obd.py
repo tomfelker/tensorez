@@ -30,7 +30,17 @@ from tensorez.fourier import *
 
 # corresponds to obd()
 # returns estimated_image, estimated_psf
-def obd_step(estimated_image, observed_image, psf_shape, clip = 255/256, psf_iterations = 500, estimated_image_iterations = 1):
+@tf.function
+def obd_step(
+    estimated_image,
+    observed_image,
+    psf_shape,
+    clip = tf.constant(255/256),
+    psf_iterations = tf.constant(1000),
+    estimated_image_iterations = tf.constant(1),
+    tolerance = tf.constant(1e-6),
+    estimated_image_update_power = tf.constant(.03)
+    ):
     
     # solve (as accurately as possible) for the best all-positive-valued estimated_psf
     # to minimize the difference between
@@ -53,20 +63,19 @@ def obd_step(estimated_image, observed_image, psf_shape, clip = 255/256, psf_ite
     #not sure why we do this:
     estimated_image *= sum_estimated_psf
 
-    estimated_image = obd_update(estimated_image, estimated_psf, observed_image, iterations = estimated_image_iterations, clip = clip, update_power = .1)
+    estimated_image = obd_update(estimated_image, estimated_psf, observed_image, iterations = estimated_image_iterations, clip = clip, update_power = estimated_image_update_power)
 
     return estimated_image, estimated_psf
 
-def obd_update(f, x, y, iterations, clip, update_power = None):
+def obd_update(f, x, y, iterations, clip, update_power = None, tolerance = tf.constant(1e-8)):
     m = tf.cast(y < clip, y.dtype)
     y = tf.multiply(y, m)
     for i in range(0, iterations):
-        ytmp = tf.math.maximum(0, conv2d_fourier(x, f))
+        ytmp = tf.math.maximum(0.0, conv2d_fourier(x, f))
         ytmp = tf.math.multiply(ytmp, m)
-        nom = tf.math.maximum(0, conv2d_transpose_fourier(x, y))
-        denom = tf.math.maximum(0, conv2d_transpose_fourier(x, ytmp))
-        tol = 1e-10
-        factor = (nom + tol) / (denom + tol)
+        nom = tf.math.maximum(0.0, conv2d_transpose_fourier(x, y))
+        denom = tf.math.maximum(0.0, conv2d_transpose_fourier(x, ytmp))        
+        factor = (nom + tolerance) / (denom + tolerance)
 
         # just a thought, maybe we're still learning too fast
         if update_power is not None:
@@ -88,10 +97,16 @@ def conv2d_fourier(x, f):
 
     f_pad = pad_zeros_after_2d(f, x.shape)
 
+    print(f'FFT shape x: {x.shape}')
+    print(f'FFT shape f_pad: {f_pad.shape}')
+    
     x_freq = tf.signal.fft2d(real_to_complex(x))
     f_freq = tf.signal.fft2d(real_to_complex(f_pad))
     
     y_freq = tf.math.multiply(x_freq, f_freq)
+
+    print(f'IFFT shape y_freq: {y_freq.shape}')
+
     y_pad = tf.signal.ifft2d(y_freq)
 
     # hmm, hope i'm not off-by-one
@@ -108,13 +123,20 @@ def conv2d_transpose_fourier(x, y):
     # hmm, i wonder why they don't just do the same recursive call thing when switching sizes?
     if x.shape[-1] >= y.shape[-1]:
         #   f = cnv2slice(ifft2(conj(fft2(x)).*fft2(cnv2pad(y, sf))), 1:sf(1), 1:sf(2));
+
+        print(f'FFT shape x: {x.shape}')
+
         x_freq = tf.signal.fft2d(real_to_complex(x))
         
         y_pad = pad_zeros_before_2d(y, x.shape)
 
+        print(f'FFT shape y_pad: {y_pad.shape}')
+
         y_freq = tf.signal.fft2d(real_to_complex(y_pad))
 
         product = tf.math.multiply(tf.math.conj(x_freq), y_freq)
+
+        print(f'IFFT shape product: {product.shape}')
 
         f_pad = tf.signal.ifft2d(product)
 
@@ -141,13 +163,21 @@ def conv2d_transpose_fourier(x, y):
         )
 
         x_pad = pad_zeros_after_2d(x, f_shape)
+
+        print(f'FFT shape x_pad: {x_pad.shape}')
+
         x_freq = tf.signal.fft2d(real_to_complex(x_pad))
 
         y_pad = pad_zeros_before_2d(y, f_shape)
         # hrm this makes no sense, not sure about padding
+
+        print(f'FFT shape y_pad: {y_pad.shape}')
+
         y_freq = tf.signal.fft2d(real_to_complex(y_pad))
 
         product = tf.math.multiply(tf.math.conj(x_freq), y_freq)
+
+        print(f'IFFT shape product: {product.shape}')
 
         f = tf.signal.ifft2d(product)
 
