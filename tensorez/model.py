@@ -189,20 +189,62 @@ class TensoRezModel(tf.keras.Model):
         self.estimated_image.assign(average_image)
         self.have_initial_estimate = True
 
-    @tf.function
-    def predict_observed_images(self):
-        
+    def apply_psf_conv(self):
         predicted_observed_images = []
         for example_index in range(0, self.batch_size):            
             predicted_observed_image = tf.nn.conv2d(self.estimated_image, self.point_spread_functions[example_index, ...], strides = self.super_resolution_factor, padding = 'VALID')
             predicted_observed_image = tf.squeeze(predicted_observed_image, axis = 0)
             predicted_observed_images.append(predicted_observed_image)
         predicted_observed_images = tf.stack(predicted_observed_images, axis = 0)
+        return predicted_observed_images
 
-        #if self.super_resolution_factor != 1:
-            #todo: should I instead just stride the above convolution?  might be equivalent...
-            #predicted_observed_images = tf.nn.avg_pool2d(predicted_observed_images, ksize = self.super_resolution_factor, strides = self.super_resolution_factor, padding = 'SAME')
+    def apply_psf_fft(self):
+        estimated_image_spatial = bhwc_to_bchw(self.estimated_image)
+        estimated_image_spatial = tf.complex(estimated_image_spatial, 0.0)
 
+        # self.point_spread_functions has shape (batch, height, width, 1, channels)
+        psf_shape_hw = [self.point_spread_functions.shape[-4], self.point_spread_functions.shape[-3]]
+        # get rid of a pointless dimension that is used when doing a direct conv
+        psf_spatial = tf.squeeze(self.point_spread_functions, axis = -2)
+        psf_spatial = bhwc_to_bchw(psf_spatial)
+        psf_spatial = tf.pad(psf_spatial, [(0, 0), (0, 0), (0, estimated_image_spatial.shape[-2] - psf_spatial.shape[-2]), (0, estimated_image_spatial.shape[-1] - psf_spatial.shape[-1])])
+        psf_spatial = tf.roll(psf_spatial, shift = [-int(psf_shape_hw[-2] // 2), -int(psf_shape_hw[-1] // 2)], axis = [-2, -1])
+        psf_spatial = tf.complex(psf_spatial, 0.0)
+
+        estimated_image_frequency = tf.signal.fft2d(estimated_image_spatial)
+        psf_frequency = tf.signal.fft2d(psf_spatial)
+
+        convolution_frequency = tf.multiply(estimated_image_frequency, psf_frequency)
+
+        convolution_spatial = tf.signal.ifft2d(convolution_frequency)
+
+        #convolution_spatial = tf.slice(
+        #    convolution_spatial,
+        #    [0, 0, int((convolution_spatial.shape[-2] - estimated_image_spatial.shape[-2]) // 2), int((convolution_spatial.shape[-1] - estimated_image_spatial.shape[-1]) // 2)],
+        #    [convolution_spatial.shape[-4], convolution_spatial[-3], estimated_image_spatial.shape[-2], estimated_image_spatial.shape[-1]]
+        #)
+
+        convolution_spatial = convolution_spatial[
+            :,
+            :,
+            (psf_shape_hw[-2] // 2) : convolution_spatial.shape[-2] - ((psf_shape_hw[-2] - 1) // 2),
+            (psf_shape_hw[-1] // 2) : convolution_spatial.shape[-1] - ((psf_shape_hw[-1] - 1) // 2)
+        ]
+
+
+        # hmm, do we need to take the magnitude here?
+        convolution_spatial = tf.real(convolution_spatial)
+
+        return  bchw_to_bhwc(convolution_spatial)
+
+    #@tf.function
+    def predict_observed_images(self):
+        
+        if self.super_resolution_factor != 1:
+            predicted_observed_images = self.apply_psf_conv()
+        else:
+            predicted_observed_images = self.apply_psf_fft()
+        
         if self.model_noise:
             predicted_observed_images = predicted_observed_images * self.noise_image_scale + tf.random.normal(shape = self.noise_scale.shape) * self.noise_scale + self.noise_bias
 

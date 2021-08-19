@@ -163,6 +163,7 @@ except ModuleNotFoundError:
     pass
 
 print("TensoRez v0.1")
+print(tf.__version__)
 
 # Instead of editing the above, you can override in local_settings.py, which will be excluded from git.
 # You, dear user, need not do this.
@@ -328,7 +329,7 @@ else:
 
         for var_index, var in enumerate(all_vars):
             if var in model.image_training_vars:
-                if True:
+                if False:
                     scale = 1.0 # 1.0 / 2.0
                     #scale *= scale
                     #scale *= scale
@@ -355,7 +356,7 @@ else:
         seconds_left = steps_left * step_elapsed_seconds       
         print(", step took {:.2f} seconds, done in {}".format(step_elapsed_seconds, datetime.timedelta(seconds = round(seconds_left))))
 
-        if overall_training_step < 10 or overall_training_step % 10 == 0:
+        if overall_training_step < 10 or (overall_training_step < 100 and overall_training_step % 10 == 0) or overall_training_step % 100 == 0:
             model.write_psf_debug_images(output_dir, overall_training_step)
             model.write_image_debug_images(output_dir, overall_training_step)
 

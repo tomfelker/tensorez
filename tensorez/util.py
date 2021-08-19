@@ -330,6 +330,7 @@ def center_images(images, **kwargs):
     return map_along_tensor_axis((lambda image: center_image(image, **kwargs)[0]), images, 0)
 
 def hwc_to_chw(t):
+    # hmm, doesn't work in @tf.function context... just use the more hardcoded versions below
     rank = tf.rank(t)
     perm = list(range(0, rank))
     perm[-3] = rank - 1
@@ -345,8 +346,14 @@ def chw_to_hwc(t):
     perm[-1] = rank - 3
     return tf.transpose(t, perm = perm)
 
+def bhwc_to_bchw(t):
+    return tf.transpose(t, perm = [0, 3, 1, 2])
+
+def bchw_to_bhwc(t):
+    return tf.transpose(t, perm = [0, 2, 3, 1])
+
 def real_to_complex(t):
     return tf.complex(t, tf.cast(0, t.dtype))
 
 def signal_fftshift_2d(x):
-    return tf.roll(x, shift = (x.shape[-2] // 2, x.shape[-1] // 2), axis = (-2, -1))
+    return tf.roll(x, shift = [int(x.shape[-2] // 2), int(x.shape[-1] // 2)], axis = [-2, -1])
