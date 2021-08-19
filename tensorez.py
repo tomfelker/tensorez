@@ -253,8 +253,11 @@ model.write_image_debug_images(output_dir, 0)
 if bifurcated_training:
     print("Beginning bifurcated training....")
 
-    image_optimizer = tf.compat.v1.train.AdamOptimizer(image_learning_rate)
-    psf_optimizer = tf.compat.v1.train.AdamOptimizer(psf_learning_rate)
+    #image_optimizer = tf.compat.v1.train.AdamOptimizer(image_learning_rate)
+    #psf_optimizer = tf.compat.v1.train.AdamOptimizer(psf_learning_rate)
+
+    image_optimizer = tf.compat.v1.train.SGD(image_learning_rate)
+    psf_optimizer = tf.compat.v1.train.SGD(psf_learning_rate)
 
     for overall_training_step in range(1, training_steps):
 
@@ -302,7 +305,9 @@ else:
     print("Will train variables: {}".format(list(map((lambda var: var.name), all_vars))))
 
     print("Learning rate: {}".format(learning_rate))
-    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)    
+    #optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate * .001)    
+    #optimizer = tf.keras.optimizers.SGD(learning_rate)    
+    optimizer = tf.keras.optimizers.RMSprop(learning_rate * .0001)    
     for overall_training_step in range(1, training_steps + 1):
         
         step_start_time = time.perf_counter()
@@ -319,10 +324,31 @@ else:
         print(" loss {:.5e}".format(sum(model.losses)), end = '', flush = True)
 
         grads = tape.gradient(model.losses, all_vars)
+
+
+        for var_index, var in enumerate(all_vars):
+            if var in model.image_training_vars:
+                if True:
+                    scale = 1.0 # 1.0 / 2.0
+                    #scale *= scale
+                    #scale *= scale
+                    grads[var_index] *= scale
+                if False:
+                    grads[var_index] = tf.minimum(0, grads[var_index])
+
+        for var_index, var in enumerate(all_vars):
+            if var in model.psf_training_vars:
+                if True:
+                    avg = tf.reduce_mean(grads[var_index], axis = (-4, -3), keepdims = True)
+                    grads[var_index] -= avg * 0.95
+                if False:
+                    grads[var_index] = tf.minimum(0, grads[var_index])
+
+
         optimizer.apply_gradients(zip(grads, all_vars))
 
-        model.apply_psf_physicality_constraints()
-        model.apply_image_physicality_constraints()
+        #model.apply_psf_physicality_constraints()
+        #model.apply_image_physicality_constraints()
 
         step_elapsed_seconds = time.perf_counter() - step_start_time
         steps_left = training_steps - overall_training_step

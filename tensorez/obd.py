@@ -35,7 +35,7 @@ def obd_step(
     estimated_image,
     observed_image,
     psf_shape,
-    clip = tf.constant(255/256),
+    clip = tf.constant(9999.0), # tf.constant(255/256),
     psf_iterations = tf.constant(1000),
     estimated_image_iterations = tf.constant(1),
     tolerance = tf.constant(1e-6),
@@ -58,10 +58,11 @@ def obd_step(
 
     estimated_psf = obd_update(estimated_psf, estimated_image, observed_image, iterations = psf_iterations, clip = clip)
 
-    sum_estimated_psf = tf.reduce_sum(estimated_psf, axis = (-2, -1), keepdims = True)
-    estimated_psf *= 1 / sum_estimated_psf
-    #not sure why we do this:
-    estimated_image *= sum_estimated_psf
+    if True:
+        sum_estimated_psf = tf.reduce_sum(estimated_psf, axis = (-2, -1), keepdims = True)
+        estimated_psf *= 1 / sum_estimated_psf
+        #not sure why we do this:
+        estimated_image *= sum_estimated_psf
 
     estimated_image = obd_update(estimated_image, estimated_psf, observed_image, iterations = estimated_image_iterations, clip = clip, update_power = estimated_image_update_power)
 

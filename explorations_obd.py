@@ -12,6 +12,8 @@ from tensorez.bayer import *
 from tensorez.fourier import *
 from tensorez.obd import *
 
+###############################################################################
+# Settings
 align_by_center_of_mass = True
 file_glob_darks = None
 crop = None
@@ -20,8 +22,15 @@ dark_ratio = 1
 
 frame_skip = 0
 frame_limit = None
-dark_limit = None
+dark_frame_limit = None
 max_align_steps = 50
+only_even_shifts = False
+# (power of 2) + 1 is most efficient
+psf_size = 256+1
+
+
+###############################################################################
+# Data selection
 
 #file_glob = os.path.join('data', 'firecapture_examples', 'jup', 'Jup_fixedbayer.ser')
 #file_glob = os.path.join('data', 'jupiter_mvi_6906', '????????.png')
@@ -49,9 +58,16 @@ max_align_steps = 50
 
 #dark ratio 6 * 510/330 = 9.27 was too much, 5 * 510/330  = 7.72 not enough
 
-file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-22Z','2020-12-22-0148_3-CapObj.SER'); align_by_center_of_mass = False; initial_blur_stddev_px = 10; file_glob_darks = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-30Z','2020-12-30-0303_5-CapObj.SER'); dark_ratio = .3; frame_limit = 1000; dark_limit = 1000; crop = (3072, 2048)
+#file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-22Z','2020-12-22-0148_3-CapObj.SER'); align_by_center_of_mass = False; initial_blur_stddev_px = 0; file_glob_darks = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-30Z','2020-12-30-0303_5-CapObj.SER'); dark_ratio = 1; frame_limit = 100; dark_frame_limit = 100; crop = (3072, 2048)
 
-psf_size = 256+1
+#file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-22Z','2020-12-22-0148_3-CapObj.SER'); align_by_center_of_mass = False; initial_blur_stddev_px = 0; frame_limit = 100; crop = (3072, 2048)
+
+file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-22Z','2020-12-22-0148_3-CapObj.SER'); align_by_center_of_mass = False; initial_blur_stddev_px = 0; frame_limit = 100; crop = (384, 384); crop_center =(492, 1468)
+
+
+
+###############################################################################
+# Code
 
 output_dir = os.path.join("output", "latest_obd", datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
 
@@ -64,9 +80,9 @@ except ModuleNotFoundError:
     print("Warning: to generate log.txt, need to install tee.")
     pass
 
-only_even_shifts = False
-
 def process_image(image_hwc, align_by_center_of_mass, crop):
+    # todo: this is dumb, replace with real alignment
+    # todo: it also probably works best if images are mean 0, could do that...
     if align_by_center_of_mass:
         align_steps = 0
         while True:                
@@ -85,69 +101,45 @@ def process_image(image_hwc, align_by_center_of_mass, crop):
 
     return image_hwc        
 
+def load_average_image(file_glob, frame_limit = None, frame_skip = None, dark_image_to_subtract = None, **process_image_args):
+    average_image = None
+    image_count = 0
+    for filename in glob.glob(file_glob):
+        for image_hwc in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):           
+
+            image_hwc = process_image(image_hwc, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+
+            if dark_image_to_subtract is not None:
+                image_hwc = image_hwc - dark_image_to_subtract
+
+            if average_image is None:
+                average_image = image_hwc
+            else:
+                average_image += image_hwc
+
+            image_count += 1
+            if frame_limit is not None and image_count >= frame_limit:
+                break
+    if image_count > 0:
+        average_image *= 1 / image_count
+    return average_image
 
 dark_image = None
-dark_count = 0
 if file_glob_darks is not None:
-    for filename in glob.glob(file_glob_darks):
-        for image_hwc in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):
-            dark_count += 1
-
-            if dark_limit is not None and dark_count > dark_limit:
-                break
-
-            #if crop is not None:
-            #    image_hwc = crop_image(image_hwc, crop, crop_align = 2)
-
-            if dark_image is None:
-                dark_image = image_hwc
-            else:
-                dark_image += image_hwc
-    dark_image *= dark_ratio / dark_count
+    dark_image = load_average_image(file_glob_darks, frame_limit = dark_frame_limit, crop = crop)
     write_image(dark_image, os.path.join(output_dir, 'dark.png'))
     write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
 
-average_image = None
-image_count = 0
-for filename in glob.glob(file_glob):   
-    for image_hwc in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):
-        image_count += 1
-        if frame_limit is not None and image_count > frame_limit:
-            break
+estimated_image = load_average_image(file_glob, frame_limit = frame_limit, frame_skip = frame_skip, dark_image_to_subtract = dark_image)
+write_image(estimated_image, os.path.join(output_dir, 'initial_estimated_image.png'))
+write_image(estimated_image, os.path.join(output_dir, 'initial_estimated_image_normalized.png'), normalize = True)
 
-        if dark_image is not None:
-            image_hwc -= dark_image
+#bias = -tf.reduce_min(estimated_image, keep_dims = True) + .2
+bias = .2
+print(f'bias: {bias}')
+estimated_image += bias
 
-        image_hwc = process_image(image_hwc, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
-
-        if average_image is None:
-            average_image = image_hwc
-        else:
-            average_image += image_hwc
-average_image *= 1 / image_count
-write_image(average_image, os.path.join(output_dir, 'average_image.png'))
-write_image(average_image, os.path.join(output_dir, 'average_image_normalized.png'), normalize = True)
-
-if False and dark_image is not None and align_by_center_of_mass is False:
-    average_undarkened_image_chw = hwc_to_chw(average_image + dark_image)
-    average_undarkened_image_freq = signal_fftshift_2d(tf.fft2d(real_to_complex(average_undarkened_image_chw)))
-
-    dark_image_freq = signal_fftshift_2d(tf.fft2d(real_to_complex(hwc_to_chw(dark_image/dark_ratio))))
-
-    average_undarkened_image_hifreq = tf.concat([tf.squeeze(average_undarkened_image_freq[:,:,0,:]), tf.squeeze(average_undarkened_image_freq[:,:,:,0])], -1)
-    dark_image_hifreq = tf.concat([tf.squeeze(dark_image_freq[:,:,0,:]), tf.squeeze(dark_image_freq[:,:,:,0])], -1)
-
-    undarked_norm = tf.norm(average_undarkened_image_hifreq, axis = -1)
-    dark_norm = tf.norm(dark_image_hifreq, axis = -1)
-    dark_dot_undarked = tf.reduce_sum(average_undarkened_image_hifreq * dark_image_hifreq, axis = -1)
-    ideal_dark_fraction = dark_dot_undarked / dark_norm
-    print(f'ideal_dark_fraction {ideal_dark_fraction}')
-    print('meh')
-
-
-
-
-estimated_image = hwc_to_chw(pad_for_conv(average_image, psf_size))
+estimated_image = hwc_to_chw(pad_for_conv(estimated_image, psf_size))
 
 if initial_blur_stddev_px is not 0:
     initial_blur_psf = gaussian_psf(psf_size, initial_blur_stddev_px / psf_size)
@@ -167,8 +159,6 @@ if initial_blur_stddev_px is not 0:
     estimated_image = hwc_to_chw(estimated_image)
 
 
-
-
 psf_shape = (1, 3, psf_size, psf_size)
 step = 0
 epoch = 0
@@ -177,30 +167,40 @@ while True:
     image_count = 0
     loop_start_time = time.perf_counter()
     for filename in glob.glob(file_glob):
-        for image_hwc in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):
-            image_count += 1
-            if frame_limit is not None and image_count > frame_limit:
-                break
-
-            if dark_image is not None:
-                image_hwc -= dark_image
-
-            image_hwc = process_image(image_hwc, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
-
-            image = hwc_to_chw(image_hwc)
+        for image in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):
             
+            image = process_image(image, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+            
+            if dark_image is not None:
+                image = image - dark_image
+
+            image += bias
+
+            image = hwc_to_chw(image)
+            
+            write_sequential_image(chw_to_hwc(image), output_dir, 'image', step, normalize = False, saturate = False)
+            write_sequential_image(chw_to_hwc(estimated_image), output_dir, 'estimated_image', step, normalize = False, saturate = False)
+
             estimated_image, estimated_psf = obd_step(estimated_image, image, psf_shape)    
 
             write_every = 1 << epoch
             if step_in_epoch % write_every == 0:
-                write_sequential_image(chw_to_hwc(estimated_image), output_dir, 'estimated_image', step, normalize = False, saturate = False)
-                write_sequential_image(chw_to_hwc(estimated_image), output_dir, 'estimated_image_normalized', step, normalize = True, saturate = False)
-                write_sequential_image(chw_to_hwc(estimated_image), output_dir, 'estimated_image_fancy', step, normalize = False, saturate = True)
-                write_sequential_image(chw_to_hwc(estimated_psf), output_dir, 'estimated_psf', step, normalize = True)
+                
 
+                estimated_image_debiased = estimated_image - bias                
+                write_sequential_image(chw_to_hwc(estimated_image_debiased), output_dir, 'estimated_image_debiased', step, normalize = False, saturate = False)
+                write_sequential_image(chw_to_hwc(estimated_image_debiased), output_dir, 'estimated_image_debiased_normalized', step, normalize = True, saturate = False)
+                write_sequential_image(chw_to_hwc(estimated_image_debiased), output_dir, 'estimated_image_debiased_normalized_saturated', step, normalize = False, saturate = True)
+                del estimated_image_debiased
+                write_sequential_image(chw_to_hwc(estimated_psf), output_dir, 'estimated_psf', step, normalize = True)
+            
             step += 1
             step_in_epoch += 1
             perf_counter = time.perf_counter()
             print(f'loop time: {perf_counter - loop_start_time}')
             loop_start_time = perf_counter
+
+            image_count += 1
+            if frame_limit is not None and image_count >= frame_limit:
+                break
     epoch += 1

@@ -3,6 +3,16 @@ import tensorez.modified_stn as stn
 import os
 import os.path
 
+# Goal of all this is something like:
+#
+# - Load a sequence of raw images, like perhaps a landscape shot with stars in it, or something with multiple planets, or maybe just one...
+# - Optionally, load a mask image, with white showing which parts of the raw image to try and align
+# - Optionally, specify a smaller rectangular slice of the image to focus on
+# - Do the alignment
+# - Receive some data, that we can remember along with the original image name
+# - Be able to load the image and do that align thingy
+
+
 
 
 def align_image(unaligned_image_bhwc, target_image_bhwc, **kwargs):
@@ -50,26 +60,7 @@ def generate_mask_image_1d(size, border_fraction = .1, dtype = tf.float32):
 
 
 def transform_image(unaligned_image_bhwc, alignment_transform):
-
-    width = unaligned_image_bhwc.shape[-2].value
-    height = unaligned_image_bhwc.shape[-3].value
-
-    fix_scale_x = width / (width - 1.0)
-    fix_scale_y = height / (height - 1.0)
-    fix_scale = tf.constant([
-        [fix_scale_x, fix_scale_x, 1.0],
-        [fix_scale_y, fix_scale_y, 1.0]
-    ])
-
-    fix_bias = tf.constant([
-        [0.0, 0.0, 1.0 / (width - 1)],
-        [0.0, 0.0, 1.0 / (height - 1)]
-    ])
-
-    fixed_alignment_transform = tf.add(tf.multiply(alignment_transform, fix_scale), fix_bias)
-
     return stn.spatial_transformer_network(unaligned_image_bhwc, alignment_transform)
-    #return stn.spatial_transformer_network(unaligned_image_bhwc, fixed_alignment_transform)
 
 def alignment_loss(unaligned_image_bhwc, target_image_bhwc, mask_image_bhwc):
     return tf.math.reduce_mean(tf.math.square(tf.math.multiply((unaligned_image_bhwc - target_image_bhwc), mask_image_bhwc)), axis = (-3, -2, -1), keepdims = True)

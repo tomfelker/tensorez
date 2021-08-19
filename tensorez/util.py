@@ -62,8 +62,8 @@ def crop_image(image, crop, crop_align, crop_offsets = None, crop_center = None)
         else:
             if crop_offsets is None:
                 crop_offsets = (0, 0)
-            x = (image.shape[-2] - width) // 2 + crop_offsets[0]
-            y = (image.shape[-3] - height) // 2 + crop_offsets[1]
+            x = int((image.shape[-2] - width)) // 2 + crop_offsets[0]
+            y = int((image.shape[-3] - height)) // 2 + crop_offsets[1]
         
         # round so as not to mess up the bayer pattern
         x = (x // crop_align) * crop_align
@@ -159,7 +159,7 @@ class ImageSequenceReader:
     def __init__(self, filename, skip = 0, **kwargs):
         self.filename = filename
         self.kwargs = kwargs
-        self.skip = skip
+        self.skip = 0 if skip is None else skip
 
     def __iter__(self):
         self.current_frame_index = self.skip
