@@ -186,7 +186,7 @@ images_for_initial_estimate = []
 images_for_training = []
 
 for filename in glob.glob(file_glob):
-    for image in ImageSequenceReader(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = True):
+    for image, frame_index in ImageSequenceReader(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = True):
         if align_by_center_of_mass:
             image, shift, shift_axis = center_image(image)
             print("Aligning by center of mass, shifted image by {}".format(shift))
@@ -198,7 +198,7 @@ for filename in glob.glob(file_glob):
             attempt_bayer_processing = False
 
         if attempt_bayer_processing:
-            image = read_image(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = False)
+            image = read_image(filename, to_float = not model_adc, crop = crop, crop_offsets = crop_offsets, demosaic = False, frame_index = frame_index)
             if image.shape[-1] == 1:
                 if align_by_center_of_mass:
                     print("Also shifted raw image that amount.")
@@ -328,9 +328,9 @@ else:
 
 
         for var_index, var in enumerate(all_vars):
-            if var in model.image_training_vars:
-                if False:
-                    scale = 1.0 # 1.0 / 2.0
+            if var is model.estimated_image:
+                if True:
+                    scale = 1.0 / 4.0
                     #scale *= scale
                     #scale *= scale
                     grads[var_index] *= scale
@@ -338,7 +338,7 @@ else:
                     grads[var_index] = tf.minimum(0, grads[var_index])
 
         for var_index, var in enumerate(all_vars):
-            if var in model.psf_training_vars:
+            if var is model.point_spread_functions:
                 if True:
                     avg = tf.reduce_mean(grads[var_index], axis = (-4, -3), keepdims = True)
                     grads[var_index] -= avg * 0.95

@@ -36,10 +36,10 @@ def obd_step(
     observed_image,
     psf_shape,
     clip = tf.constant(9999.0), # tf.constant(255/256),
-    psf_iterations = tf.constant(1000),
+    psf_iterations = tf.constant(100),
     estimated_image_iterations = tf.constant(1),
     tolerance = tf.constant(1e-6),
-    estimated_image_update_power = tf.constant(.03)
+    estimated_image_update_power = tf.constant(.1)
     ):
     
     # solve (as accurately as possible) for the best all-positive-valued estimated_psf

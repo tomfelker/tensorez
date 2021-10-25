@@ -233,11 +233,11 @@ class TensoRezModel(tf.keras.Model):
 
 
         # hmm, do we need to take the magnitude here?
-        convolution_spatial = tf.real(convolution_spatial)
+        convolution_spatial = tf.math.real(convolution_spatial)
 
         return  bchw_to_bhwc(convolution_spatial)
 
-    #@tf.function
+    @tf.function
     def predict_observed_images(self):
         
         if self.super_resolution_factor != 1:

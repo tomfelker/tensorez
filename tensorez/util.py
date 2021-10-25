@@ -137,6 +137,8 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
                 pass
             elif header.color_id == ser_format.ColorId.BAYER_RGGB:
                 image = apply_demosaic_filter(image, demosaic_kernels_rggb)
+            elif header.color_id == ser_format.ColorId.BAYER_GRBG:
+                image = apply_demosaic_filter(image, demosaic_kernels_grbg)
             else:
                 raise RuntimeError(f"SER file {filename} has unrecognized bayer pattern {header.color_id}")
 
@@ -174,7 +176,7 @@ class ImageSequenceReader:
             raise StopIteration
         image = read_image(self.filename, frame_index = self.current_frame_index, **self.kwargs)
         self.current_frame_index += 1
-        return image
+        return image, self.current_frame_index - 1
 
 
 
@@ -252,7 +254,7 @@ def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True, only_a
     ret = None
     for dim in spatial_dims:
         #print("Evaluating CoM in dim", dim)
-        dim_size = image.shape[dim].value
+        dim_size = image.shape[dim]
         #print("which is of size", dim_size)
         multiplier = tf.linspace(-dim_size / 2.0, dim_size / 2.0, dim_size)
 

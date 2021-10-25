@@ -78,7 +78,10 @@ demosaic_null = [
     [ [ 0, 0, 0], [1, 1, 1], [0, 0, 0] ],
     [ [ 0, 0, 0], [0, 0, 0], [0, 0, 0] ]]
 
+# demosaic_* shape is [filter_height, filter_width, filter_channel], value is how much to look at that channel
 
+# R G
+# G B
 
 demosaic_r = [
     [ [ 0,   0, .25], [0, .25, 0], [0,   0, .25] ],
@@ -99,12 +102,18 @@ demosaic_b = [
     [ [ .25,   0, 0], [0, .25, 0], [.25,   0, 0] ],
     [ [   0, .25, 0], [0,   0, 1], [  0, .25, 0] ],
     [ [ .25,   0, 0], [0, .25, 0], [.25,   0, 0] ]]
-        
+    
+# demosaic_kernels_rggb shape will be [height, width, filter_height, filter_width, output_channel?, filter_channel]
+
 demosaic_kernels_rggb = tf.cast([
         [ demosaic_r,            demosaic_g_upper_right ],
         [ demosaic_g_lower_left, demosaic_b ]
     ], dtype = tf.float32)
 demosaic_kernels_rggb = tf.expand_dims(demosaic_kernels_rggb, axis = -2)
+
+# G R
+# B G
+demosaic_kernels_grbg = tf.reverse(demosaic_kernels_rggb, axis = [-3, -5])
 
 demosaic_kernels_null = tf.cast([
         [ demosaic_null, demosaic_null ],

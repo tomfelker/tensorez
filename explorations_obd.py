@@ -26,7 +26,7 @@ dark_frame_limit = None
 max_align_steps = 50
 only_even_shifts = False
 # (power of 2) + 1 is most efficient
-psf_size = 256+1
+psf_size = 512+1
 
 
 ###############################################################################
@@ -62,9 +62,12 @@ psf_size = 256+1
 
 #file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-22Z','2020-12-22-0148_3-CapObj.SER'); align_by_center_of_mass = False; initial_blur_stddev_px = 0; frame_limit = 100; crop = (3072, 2048)
 
-file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-22Z','2020-12-22-0148_3-CapObj.SER'); align_by_center_of_mass = False; initial_blur_stddev_px = 0; frame_limit = 100; crop = (384, 384); crop_center =(492, 1468)
+#file_glob = os.path.join('data', 'ASICAP', 'CapObj', '2020-12-22Z','2020-12-22-0148_3-CapObj.SER'); align_by_center_of_mass = False; initial_blur_stddev_px = 0; frame_limit = 100; crop = (384, 384); crop_center =(492, 1468)
 
 
+#file_glob = os.path.join('data', '2021-10-15_jupiter_prime_crop', '2021-10-16-0428_1-CapObj.SER'); crop = (1024, 1024); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime_crop', '2021-10-16-0430_9-CapObj.SER');
+
+file_glob = os.path.join('data', '2021-10-15_jupiter_prime', '2021-10-16-0439_9-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', '2021-10-16-0441_0-CapObj.SER');
 
 ###############################################################################
 # Code
@@ -97,7 +100,7 @@ def process_image(image_hwc, align_by_center_of_mass, crop):
                 break
     
     if crop is not None:
-        image_hwc = crop_image(image_hwc, crop, crop_align = 2)
+        image_hwc = crop_image(image_hwc, crop, crop_align = 1)
 
     return image_hwc        
 
@@ -105,9 +108,9 @@ def load_average_image(file_glob, frame_limit = None, frame_skip = None, dark_im
     average_image = None
     image_count = 0
     for filename in glob.glob(file_glob):
-        for image_hwc in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):           
+        for image_hwc, frame_index in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):           
 
-            image_hwc = process_image(image_hwc, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+            image_hwc = process_image(image_hwc, **process_image_args)
 
             if dark_image_to_subtract is not None:
                 image_hwc = image_hwc - dark_image_to_subtract
@@ -126,11 +129,11 @@ def load_average_image(file_glob, frame_limit = None, frame_skip = None, dark_im
 
 dark_image = None
 if file_glob_darks is not None:
-    dark_image = load_average_image(file_glob_darks, frame_limit = dark_frame_limit, crop = crop)
+    dark_image = load_average_image(file_glob_darks, frame_limit = dark_frame_limit, crop = crop, align_by_center_of_mass = False)
     write_image(dark_image, os.path.join(output_dir, 'dark.png'))
     write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
 
-estimated_image = load_average_image(file_glob, frame_limit = frame_limit, frame_skip = frame_skip, dark_image_to_subtract = dark_image)
+estimated_image = load_average_image(file_glob, frame_limit = frame_limit, frame_skip = frame_skip, dark_image_to_subtract = dark_image, crop = crop, align_by_center_of_mass = align_by_center_of_mass)
 write_image(estimated_image, os.path.join(output_dir, 'initial_estimated_image.png'))
 write_image(estimated_image, os.path.join(output_dir, 'initial_estimated_image_normalized.png'), normalize = True)
 
@@ -167,7 +170,7 @@ while True:
     image_count = 0
     loop_start_time = time.perf_counter()
     for filename in glob.glob(file_glob):
-        for image in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):
+        for image, frame_index in ImageSequenceReader(filename, skip = frame_skip, to_float = True, demosaic = True):
             
             image = process_image(image, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
             
