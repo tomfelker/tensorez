@@ -45,7 +45,7 @@ dark_frame_limit = 10
 debug_frame_limit = 10
 
 softmax_temperature = 5
-do_blur = False
+do_blur = True
 blur_standard_deviation = 10.0
 
 
@@ -145,14 +145,15 @@ def first_pass_step(average_chw, fft_mag_max_chw, image_chw, blur_tf):
     image_complex_chw = tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))
     image_fft_chw = tf.signal.fft2d(image_complex_chw)        
 
+
     # todo: deduplicate
+    image_fft_mag_chw = tf.abs(image_fft_chw)
     if blur_tf is not None:
-        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(image_fft_chw) * blur_tf)
+        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(image_fft_mag_chw, tf.zeros_like(image_fft_mag_chw))) * blur_tf)
         #write_image(image_fft_chw, os.path.join(output_dir, 'image_fft.png'), frequency_domain=True)
         #write_image(image_fft_blurred_chw, os.path.join(output_dir, 'image_fft_blurred.png'), frequency_domain=True)
         image_fft_mag_chw = tf.abs(image_fft_blurred_chw)
-    else:
-        image_fft_mag_chw = tf.abs(image_fft_chw)
+        
 
     fft_mag_max_chw.assign(tf.maximum(fft_mag_max_chw, image_fft_mag_chw))
 
@@ -200,13 +201,14 @@ def second_pass_step(best_fft_mag_sum_chw, best_fft_chw, image_chw, blur_tf):
     image_complex_chw = tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))
     image_fft_chw = tf.signal.fft2d(image_complex_chw)
     
+    # todo: deduplicate
+    image_fft_mag_chw = tf.abs(image_fft_chw)
     if blur_tf is not None:
-        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(image_fft_chw) * blur_tf)
+        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(image_fft_mag_chw, tf.zeros_like(image_fft_mag_chw))) * blur_tf)
         #write_image(image_fft_chw, os.path.join(output_dir, 'image_fft.png'), frequency_domain=True)
         #write_image(image_fft_blurred_chw, os.path.join(output_dir, 'image_fft_blurred.png'), frequency_domain=True)
         image_fft_mag_chw = tf.abs(image_fft_blurred_chw)
-    else:
-        image_fft_mag_chw = tf.abs(image_fft_chw)
+
 
     
     # and also we're subtracting fft_mag_max_chw, again for numerical stability.
