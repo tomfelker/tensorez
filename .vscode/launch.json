@@ -18,5 +18,12 @@
             "program": "tensorez.py",
             "console": "integratedTerminal"
         }
+        {
+            "name": "Python: Tensorez Lucky",
+            "type": "python",
+            "request": "launch",
+            "program": "explorations_lucky.py",
+            "console": "integratedTerminal"
+        }
     ]
 }
