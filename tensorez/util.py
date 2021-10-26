@@ -180,7 +180,21 @@ class ImageSequenceReader:
 
 
 
-def write_image(image, filename, normalize = False, saturate = True):
+def write_image(image, filename, normalize = False, saturate = True, frequency_domain = False):
+    if frequency_domain:
+        # we assume it's indexed in channels,height,width, and is non-fftshifted, and is complex numbers.
+        # we will output a human-visible image for the magnitude and the phase.
+        image = chw_to_hwc(tf.signal.fftshift(image, axes = [-1, -2]))
+
+        basename, extension = os.path.splitext(filename)
+
+        image_log_mag = tf.math.log(tf.math.abs(image))
+        write_image(image_log_mag, basename + '_log_mag' + extension, normalize = True, saturate = False, frequency_domain = False)
+
+        image_phase = (tf.math.angle(image) + math.pi) * (math.pi / 2)
+        write_image(image_phase, basename + '_phase' + extension, normalize = False, saturate = False, frequency_domain = False)
+        return
+
     print("Writing", filename)
     if normalize:
         max_val = tf.reduce_max(image)
@@ -223,21 +237,15 @@ def write_sequential_image(image, path, name, sequence_num, extension = 'png', *
         print("Problem when moving files: {}".format(e))
     
 
-# return an array of which dimensions are x, y, etc., with channels being -1st dim
-def get_spatial_dims(num_spatial_dims = 2):
-    spatial_dims = []
-    for spatial_dim_index in range(0, num_spatial_dims):
-        spatial_dims.append(-2 - spatial_dim_index)
-    return spatial_dims
-
-def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True, only_above_average = True):
+@tf.function
+def center_of_mass(image, collapse_channels = True, only_above_average = True):
     # todo: fix this - it's too complicated, and doesn't work batchwise...
     if image.shape.ndims == 4:
         image = tf.squeeze(image, axis = -4)
     
     #print("image.shape:", image.shape)
 
-    spatial_dims = get_spatial_dims(num_spatial_dims)
+    spatial_dims = [-3, -2]
 
     #print("spatial_dims:", spatial_dims)
 
@@ -258,9 +266,7 @@ def center_of_mass(image, num_spatial_dims = 2, collapse_channels = True, only_a
         #print("which is of size", dim_size)
         multiplier = tf.linspace(-dim_size / 2.0, dim_size / 2.0, dim_size)
 
-        multiplier_shape = []
-        for sum_dim in range(0, tf.rank(image)):
-            multiplier_shape.append(1)
+        multiplier_shape = [1, 1, 1]        
         multiplier_shape[dim] = dim_size        
         #print("Multiplier shape:", multiplier_shape)
         
@@ -286,10 +292,11 @@ def pad_image(image, pad):
         image = tf.pad(image, paddings)
     return image
 
+@tf.function
 def center_image(image, pad = 0, only_even_shifts = False):
     image = pad_image(image, pad)
     
-    spatial_dims = get_spatial_dims()    
+    spatial_dims = [-3, -2]
 
     com = center_of_mass(image)
 
