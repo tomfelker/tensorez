@@ -23,10 +23,11 @@ def map_along_tensor_axis(func, tensor, axis, keepdims = False):
 
 
 # I have no idea why this doesn't seem to come with TensorFlow...
-def gaussian(x, mean = 0, variance = 1):
-    sigma = math.sqrt(variance)
-    return (1.0 / (sigma * math.sqrt(2 * math.pi))) * tf.exp(-0.5 * tf.square((x - mean) / sigma))
+def gaussian(x, mean = 0.0, variance = 1.0):
+    sigma = tf.sqrt(variance)
+    return (1.0 / (sigma * tf.sqrt(2 * tf.constant(math.pi, dtype = tf.float32)))) * tf.exp(-0.5 * tf.square((x - mean) / sigma))
 
+# a square, centered PSF, with standard deviation in terms of the dimension of the square
 def gaussian_psf(size, standard_deviation = .1):    
     
     coords = tf.linspace(-0.5, 0.5, size)
@@ -36,13 +37,21 @@ def gaussian_psf(size, standard_deviation = .1):
     coords_y = tf.expand_dims(coords, axis = -1)
     coords_r = tf.sqrt(tf.square(coords_x) + tf.square(coords_y))
     
-    psf = gaussian(coords_r, variance = standard_deviation * standard_deviation)
+    psf = gaussian(coords_r, variance = tf.square(standard_deviation))
     #psf = 0.5 - coords_r
 
     psf = psf / tf.reduce_sum(psf)
     psf = tf.expand_dims(psf, axis = -1)
     return psf
 
+
+def gaussian_kernel_2d(size, standard_deviation):
+    coords_y = tf.expand_dims(tf.linspace(-1.0 * (size[-2] // 2), 1.0 * (size[-2] - size[-2] // 2), size[-2]), axis = -1)
+    coords_x = tf.expand_dims(tf.linspace(-1.0 * (size[-1] // 2), 1.0 * (size[-1] - size[-1] // 2), size[-1]), axis = -2)
+    coords_r = tf.sqrt(tf.square(coords_x) + tf.square(coords_y))
+    kernel = gaussian(coords_r, variance = tf.square(standard_deviation))
+    kernel = kernel / tf.reduce_sum(kernel)
+    return kernel
 
 def promote_to_three_channels(image):
     if image.shape.ndims == 2:

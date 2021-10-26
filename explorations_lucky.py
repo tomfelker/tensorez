@@ -45,12 +45,14 @@ dark_frame_limit = 10
 debug_frame_limit = 10
 
 softmax_temperature = 5
+do_blur = False
+blur_standard_deviation = 10.0
 
 
 ###############################################################################
 # Data selection
 
-file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.dark.SER'); crop = (2048, 2048)
+file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.dark.SER'); #crop = (2048, 2048)
 #file_glob = os.path.join('data', '2021-10-15_jupiter_prime_crop', '*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime_crop', '*.dark.SER'); crop = (512, 512)
 #file_glob = os.path.join('data', '2021-10-15_jupiter_barlow3x', '2021-10-16-0501_0-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_barlow3x', '2021-10-16-0506_5-CapObj.SER');
 #file_glob = os.path.join('data', '2021-10-15_saturn_prime_crop', '2021-10-16-0445_8-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_saturn_prime_crop', '2021-10-16-0448_0-CapObj.SER');
@@ -117,17 +119,40 @@ if file_glob_darks is not None:
     write_image(dark_image, os.path.join(output_dir, 'dark.png'))
     write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
 
+
+if do_blur:
+    # todo ugh unknown shape stuff
+    blur_kernel = gaussian_kernel_2d([dark_image.shape[-3],dark_image.shape[-2]], blur_standard_deviation)
+    blur_kernel = tf.signal.fftshift(blur_kernel)
+    blur_kernel = tf.expand_dims(blur_kernel, axis = -3)
+
+    write_image(chw_to_hwc(blur_kernel), os.path.join(output_dir, 'blur_kernel.png'), normalize = True)
+
+    blur_tf = tf.signal.fft2d(tf.dtypes.complex(blur_kernel, tf.zeros_like(blur_kernel)))
+
+    write_image(blur_tf, os.path.join(output_dir, 'blur_tf.png'), frequency_domain = True)
+else:
+    blur_tf = None
+
 # First, we do a pass to compute the elementwise maximum magnitude of the FFT of each frame - this is necessary
 # for numerical stability of the softmax.  We can also do some nice-to-have things in this pass, like computing
 # a simple average.  TODO: store off the centers of mass, for faster processing later.
 
 #@tf.function
-def first_pass_step(average_chw, fft_mag_max_chw, image_chw):
+def first_pass_step(average_chw, fft_mag_max_chw, image_chw, blur_tf):
     average_chw.assign(average_chw + image_chw)
 
     image_complex_chw = tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))
     image_fft_chw = tf.signal.fft2d(image_complex_chw)        
-    image_fft_mag_chw = tf.abs(image_fft_chw)
+
+    # todo: deduplicate
+    if blur_tf is not None:
+        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(image_fft_chw) * blur_tf)
+        #write_image(image_fft_chw, os.path.join(output_dir, 'image_fft.png'), frequency_domain=True)
+        #write_image(image_fft_blurred_chw, os.path.join(output_dir, 'image_fft_blurred.png'), frequency_domain=True)
+        image_fft_mag_chw = tf.abs(image_fft_blurred_chw)
+    else:
+        image_fft_mag_chw = tf.abs(image_fft_chw)
 
     fft_mag_max_chw.assign(tf.maximum(fft_mag_max_chw, image_fft_mag_chw))
 
@@ -149,7 +174,7 @@ for filename in glob.glob(file_glob):
             average_chw = tf.Variable(tf.zeros_like(image_chw))
             fft_mag_max_chw = tf.Variable(tf.zeros_like(image_chw))
 
-        first_pass_step(average_chw, fft_mag_max_chw, image_chw)
+        first_pass_step(average_chw, fft_mag_max_chw, image_chw, blur_tf)
                 
         if image_count <= debug_frame_limit:            
             write_image(tf.signal.fft2d(tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))), os.path.join(output_dir, f'image_{image_count:08d}.png'), frequency_domain = True)            
@@ -165,15 +190,24 @@ average_chw.assign(average_chw * (1.0 / image_count))
 write_image(chw_to_hwc(average_chw), os.path.join(output_dir, 'average.png'), normalize = True)
 write_image(tf.signal.fft2d(tf.dtypes.complex(average_chw, tf.zeros_like(average_chw))), os.path.join(output_dir, 'fft_average.png'), frequency_domain = True)
 
+write_image(tf.dtypes.complex(fft_mag_max_chw, tf.zeros_like(fft_mag_max_chw)), os.path.join(output_dir, 'fft_mag_max.png'), frequency_domain = True)
+
 # Next pass, we compute the softmax.
 
-@tf.function
-def second_pass_step(best_fft_mag_sum_chw, best_fft_chw, image_chw):
+#@tf.function
+def second_pass_step(best_fft_mag_sum_chw, best_fft_chw, image_chw, blur_tf):
     
     image_complex_chw = tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))
     image_fft_chw = tf.signal.fft2d(image_complex_chw)
     
-    image_fft_mag_chw = tf.abs(image_fft_chw)
+    if blur_tf is not None:
+        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(image_fft_chw) * blur_tf)
+        #write_image(image_fft_chw, os.path.join(output_dir, 'image_fft.png'), frequency_domain=True)
+        #write_image(image_fft_blurred_chw, os.path.join(output_dir, 'image_fft_blurred.png'), frequency_domain=True)
+        image_fft_mag_chw = tf.abs(image_fft_blurred_chw)
+    else:
+        image_fft_mag_chw = tf.abs(image_fft_chw)
+
     
     # and also we're subtracting fft_mag_max_chw, again for numerical stability.
     # It has no effect mathematically, but it keeps the values from overflowing.
@@ -201,7 +235,7 @@ for filename in glob.glob(file_glob):
             best_fft_mag_sum_chw = tf.Variable(tf.zeros_like(image_chw, dtype = tf.dtypes.float64))
             best_fft_chw = tf.Variable(tf.zeros_like(image_chw, dtype = tf.dtypes.complex128))
 
-        second_pass_step(best_fft_mag_sum_chw, best_fft_chw, image_chw)
+        second_pass_step(best_fft_mag_sum_chw, best_fft_chw, image_chw, blur_tf)
 
         if light_frame_limit is not None and image_count >= light_frame_limit:
             break
