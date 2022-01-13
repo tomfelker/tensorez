@@ -3,6 +3,7 @@ import tensorflow as tf
 import tensorflow_graphics as tfg
 import fnmatch
 import os
+import glob
 import math
 
 #from tensorez.ser_format import *
@@ -375,3 +376,24 @@ def real_to_complex(t):
 
 def signal_fftshift_2d(x):
     return tf.roll(x, shift = [int(x.shape[-2] // 2), int(x.shape[-1] // 2)], axis = [-2, -1])
+
+def load_average_image(file_glob, frame_limit = None):
+    average_image = None
+    image_count = 0
+    for filename in glob.glob(file_glob):
+        for image_hwc, frame_index in ImageSequenceReader(filename, to_float = True, demosaic = True):           
+
+            if average_image is None:
+                average_image = tf.Variable(tf.zeros_like(image_hwc))
+            
+            average_image.assign(average_image + image_hwc)
+
+            image_count += 1
+            if frame_limit is not None and image_count >= frame_limit:
+                break
+
+    if image_count == 0:
+        raise RuntimeError(f"Couldn't load any images from '{file_glob}'.")        
+
+    average_image.assign(average_image * (1.0 / image_count))
+    return average_image, image_count

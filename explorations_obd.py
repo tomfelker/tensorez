@@ -104,7 +104,7 @@ def process_image(image_hwc, align_by_center_of_mass, crop):
 
     return image_hwc        
 
-def load_average_image(file_glob, frame_limit = None, frame_skip = None, dark_image_to_subtract = None, **process_image_args):
+def load_and_process_average_image(file_glob, frame_limit = None, frame_skip = None, dark_image_to_subtract = None, **process_image_args):
     average_image = None
     image_count = 0
     for filename in glob.glob(file_glob):
@@ -129,11 +129,11 @@ def load_average_image(file_glob, frame_limit = None, frame_skip = None, dark_im
 
 dark_image = None
 if file_glob_darks is not None:
-    dark_image = load_average_image(file_glob_darks, frame_limit = dark_frame_limit, crop = crop, align_by_center_of_mass = False)
+    dark_image = load_and_process_average_image(file_glob_darks, frame_limit = dark_frame_limit, crop = crop, align_by_center_of_mass = False)
     write_image(dark_image, os.path.join(output_dir, 'dark.png'))
     write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
 
-estimated_image = load_average_image(file_glob, frame_limit = frame_limit, frame_skip = frame_skip, dark_image_to_subtract = dark_image, crop = crop, align_by_center_of_mass = align_by_center_of_mass)
+estimated_image = load_and_process_average_image(file_glob, frame_limit = frame_limit, frame_skip = frame_skip, dark_image_to_subtract = dark_image, crop = crop, align_by_center_of_mass = align_by_center_of_mass)
 write_image(estimated_image, os.path.join(output_dir, 'initial_estimated_image.png'))
 write_image(estimated_image, os.path.join(output_dir, 'initial_estimated_image_normalized.png'), normalize = True)
 

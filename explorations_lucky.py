@@ -41,23 +41,26 @@ only_even_shifts = False
 max_align_steps = 50
 
 light_frame_limit = None
+light_frame_skip = None
 dark_frame_limit = None
 debug_frame_limit = 10
 
-softmax_temperature = 2
+softmax_temperature = 1
 do_blur = True
-blur_standard_deviation = 5
+also_blur_phase = True
+blur_standard_deviation = 4
 
 
 ###############################################################################
 # Data selection
 
-file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.dark.SER'); crop = (2048, 2048)
+#file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.dark.SER'); crop = (2048, 2048)
 #file_glob = os.path.join('data', '2021-10-15_jupiter_prime_crop', '*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime_crop', '*.dark.SER'); crop = (512, 512)
 #file_glob = os.path.join('data', '2021-10-15_jupiter_barlow3x', '2021-10-16-0501_0-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_barlow3x', '2021-10-16-0506_5-CapObj.SER');
 #file_glob = os.path.join('data', '2021-10-15_saturn_prime_crop', '2021-10-16-0445_8-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_saturn_prime_crop', '2021-10-16-0448_0-CapObj.SER');
 #file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'fake_jupiter.png');
-
+#file_glob = os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')
+file_glob = os.path.join('data', '2020-11-21Z_iss', '2020-11-21-0222_4-CapObj.SER'); light_frame_limit = 1000; light_frame_skip = 2900
 ###############################################################################
 # Code
 
@@ -92,32 +95,42 @@ def process_image(image_hwc, align_by_center_of_mass, crop):
 
     return image_hwc        
 
-def load_dark_image(file_glob, frame_limit = None):
-    average_image = None
-    image_count = 0
-    for filename in glob.glob(file_glob):
-        for image_hwc, frame_index in ImageSequenceReader(filename, to_float = True, demosaic = True):           
-
-            if average_image is None:
-                average_image = tf.Variable(tf.zeros_like(image_hwc))
-            
-            average_image.assign(average_image + image_hwc)
-
-            image_count += 1
-            if frame_limit is not None and image_count >= frame_limit:
-                break
-
-    if image_count == 0:
-        raise RuntimeError(f"Couldn't load any darks from '{file_glob}'.")        
-
-    average_image.assign(average_image * (1.0 / image_count))
-    return average_image
-
 dark_image = None
 if file_glob_darks is not None:
-    dark_image = load_dark_image(file_glob_darks, frame_limit = dark_frame_limit)
+    dark_image, image_count = load_average_image(file_glob_darks, frame_limit = dark_frame_limit)
     write_image(dark_image, os.path.join(output_dir, 'dark.png'))
     write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
+
+
+def mag_for_softmax(image_fft_chw, blur_tf):
+    if do_blur:
+        if also_blur_phase:
+            if False:
+                # hmm, this doesn't seemt to work...
+                # image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(image_fft_chw) * blur_tf)            
+                # image_fft_mag_chw = tf.abs(image_fft_blurred_chw)
+                # maybe blur real and imag separately?
+                image_fft_blurred_real_chw = tf.abs(tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(tf.math.real(image_fft_chw), tf.zeros_like(tf.math.real(image_fft_chw)))) * blur_tf))
+                image_fft_blurred_imag_chw = tf.abs(tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(tf.math.imag(image_fft_chw), tf.zeros_like(tf.math.imag(image_fft_chw)))) * blur_tf))
+                image_fft_blurred_chw = tf.dtypes.complex(image_fft_blurred_real_chw, image_fft_blurred_imag_chw)
+                image_fft_blurred_mag_chw = tf.abs(image_fft_blurred_chw)
+                #return image_fft_blurred_mag_chw
+                image_fft_mag_chw = tf.abs(image_fft_chw)
+                image_fft_mag_blurred_chw = tf.abs(tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(image_fft_mag_chw, tf.zeros_like(image_fft_mag_chw))) * blur_tf))
+                spatial_correlation = tf.math.divide_no_nan(image_fft_blurred_mag_chw, image_fft_mag_blurred_chw)
+                return spatial_correlation
+            else:
+                # hmm, just normalize then blur
+                image_fft_mag = tf.math.abs(image_fft_chw)
+                image_fft_phase = image_fft_chw * tf.dtypes.complex(tf.math.reciprocal_no_nan(image_fft_mag), tf.zeros_like(image_fft_mag))
+                image_fft_phase_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(image_fft_phase) * blur_tf)
+                return tf.abs(image_fft_phase_blurred_chw)
+        else:
+            image_fft_mag_chw = tf.abs(image_fft_chw)
+            image_fft_mag_blurred_chw = tf.abs(tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(image_fft_mag_chw, tf.zeros_like(image_fft_mag_chw))) * blur_tf))
+            return image_fft_mag_blurred_chw
+    else:
+        return tf.abs(image_fft_chw)
 
 # First, we do a pass to compute the elementwise maximum magnitude of the FFT of each frame - this is necessary
 # for numerical stability of the softmax.  We can also do some nice-to-have things in this pass, like computing
@@ -130,16 +143,8 @@ def first_pass_step(average_chw, fft_mag_max_chw, image_chw, blur_tf):
     image_complex_chw = tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))
     image_fft_chw = tf.signal.fft2d(image_complex_chw)        
 
-
-    # todo: deduplicate
-    image_fft_mag_chw = tf.abs(image_fft_chw)
-    if blur_tf is not None:
-        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(image_fft_mag_chw, tf.zeros_like(image_fft_mag_chw))) * blur_tf)
-        #write_image(image_fft_chw, os.path.join(output_dir, 'image_fft.png'), frequency_domain=True)
-        #write_image(image_fft_blurred_chw, os.path.join(output_dir, 'image_fft_blurred.png'), frequency_domain=True)
-        image_fft_mag_chw = tf.abs(image_fft_blurred_chw)
-        
-
+    image_fft_mag_chw = mag_for_softmax(image_fft_chw, blur_tf)
+    
     fft_mag_max_chw.assign(tf.maximum(fft_mag_max_chw, image_fft_mag_chw))
 
 #have to fill this in later, once we've loaded an image (so we know the shape)
@@ -149,7 +154,7 @@ image_count = 0
 average_chw = None
 fft_mag_max_chw = None
 for filename in glob.glob(file_glob):
-    for image_hwc, frame_index in ImageSequenceReader(filename, to_float = True, demosaic = True):           
+    for image_hwc, frame_index in ImageSequenceReader(filename, skip = light_frame_skip, to_float = True, demosaic = True):           
         image_count += 1
 
         if dark_image is not None:
@@ -163,7 +168,8 @@ for filename in glob.glob(file_glob):
             average_chw = tf.Variable(tf.zeros_like(image_chw))
             fft_mag_max_chw = tf.Variable(tf.zeros_like(image_chw))
             if do_blur:
-                blur_kernel = gaussian_kernel_2d([image_chw.shape[-2],image_chw.shape[-1]], blur_standard_deviation)
+                blur_kernel = gaussian_kernel_2d([image_chw.shape[-2],image_chw.shape[-1]], tf.constant(blur_standard_deviation, dtype = tf.float32))
+                blur_kernel = blur_kernel / tf.reduce_sum(blur_kernel)
                 blur_kernel = tf.signal.fftshift(blur_kernel)
                 blur_kernel = tf.expand_dims(blur_kernel, axis = -3)
 
@@ -177,6 +183,7 @@ for filename in glob.glob(file_glob):
                 
         if image_count <= debug_frame_limit:            
             write_image(tf.signal.fft2d(tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))), os.path.join(output_dir, f'image_{image_count:08d}.png'), frequency_domain = True)            
+            write_image(fft_mag_max_chw, os.path.join(output_dir, f'running_fft_mag_max_{image_count:08d}.png'), frequency_domain = True)
         
         if light_frame_limit is not None and image_count >= light_frame_limit:
             break
@@ -199,15 +206,7 @@ def second_pass_step(best_fft_mag_sum_chw, best_fft_chw, image_chw, blur_tf):
     image_complex_chw = tf.dtypes.complex(image_chw, tf.zeros_like(image_chw))
     image_fft_chw = tf.signal.fft2d(image_complex_chw)
     
-    # todo: deduplicate
-    image_fft_mag_chw = tf.abs(image_fft_chw)
-    if blur_tf is not None:
-        image_fft_blurred_chw = tf.signal.ifft2d(tf.signal.fft2d(tf.dtypes.complex(image_fft_mag_chw, tf.zeros_like(image_fft_mag_chw))) * blur_tf)
-        #write_image(image_fft_chw, os.path.join(output_dir, 'image_fft.png'), frequency_domain=True)
-        #write_image(image_fft_blurred_chw, os.path.join(output_dir, 'image_fft_blurred.png'), frequency_domain=True)
-        image_fft_mag_chw = tf.abs(image_fft_blurred_chw)
-
-
+    image_fft_mag_chw = mag_for_softmax(image_fft_chw, blur_tf)
     
     # and also we're subtracting fft_mag_max_chw, again for numerical stability.
     # It has no effect mathematically, but it keeps the values from overflowing.
@@ -221,7 +220,7 @@ image_count = 0
 best_fft_mag_sum_chw = None
 best_fft_chw = None
 for filename in glob.glob(file_glob):
-    for image_hwc, frame_index in ImageSequenceReader(filename, to_float = True, demosaic = True):           
+    for image_hwc, frame_index in ImageSequenceReader(filename, skip = light_frame_skip, to_float = True, demosaic = True):           
         image_count += 1
         
         if dark_image is not None:

@@ -59,9 +59,21 @@ def generate_mask_image_1d(size, border_fraction = .1, dtype = tf.float32):
     return mask_image_1d
 
 
+@tf.function
 def transform_image(unaligned_image_bhwc, alignment_transform):
-    return stn.spatial_transformer_network(unaligned_image_bhwc, alignment_transform)
 
+    dx = alignment_transform[0]
+    dy = alignment_transform[1]
+    theta = alignment_transform[2]
+
+    stn_transform = tf.stack([
+        tf.cos(theta), -tf.sin(theta), dx,
+        tf.sin(theta), tf.cos(theta), dy])
+    stn_transform = tf.reshape(stn_transform, (2, 3))
+
+    return stn.spatial_transformer_network(unaligned_image_bhwc, stn_transform)
+
+@tf.function
 def alignment_loss(unaligned_image_bhwc, target_image_bhwc, mask_image_bhwc):
     return tf.math.reduce_mean(tf.math.square(tf.math.multiply((unaligned_image_bhwc - target_image_bhwc), mask_image_bhwc)), axis = (-3, -2, -1), keepdims = True)
      
