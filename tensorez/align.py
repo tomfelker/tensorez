@@ -75,6 +75,6 @@ def transform_image(unaligned_image_bhwc, alignment_transform):
 
 @tf.function
 def alignment_loss(unaligned_image_bhwc, target_image_bhwc, mask_image_bhwc):
-    return tf.math.reduce_mean(tf.math.square(tf.math.multiply((unaligned_image_bhwc - target_image_bhwc), mask_image_bhwc)), axis = (-3, -2, -1), keepdims = True)
+    return tf.math.reduce_mean(tf.math.square(tf.math.multiply((unaligned_image_bhwc - target_image_bhwc), mask_image_bhwc)), axis = (-3, -2, -1))
      
 

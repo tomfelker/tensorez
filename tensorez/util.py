@@ -28,22 +28,27 @@ def gaussian(x, mean = 0.0, variance = 1.0):
     sigma = tf.sqrt(variance)
     return (1.0 / (sigma * tf.sqrt(2 * tf.constant(math.pi, dtype = tf.float32)))) * tf.exp(-0.5 * tf.square((x - mean) / sigma))
 
-# a square, centered PSF, with standard deviation in terms of the dimension of the square
-def gaussian_psf(size, standard_deviation = .1):    
-    
+def radially_symmetric_psf(size, function_of_radius):
     coords = tf.linspace(-0.5, 0.5, size)
-    # for gaussian, really we could just evaluate along the line and multiply, but
-    # this way lets us try other radially-symmetric functions:
+    
     coords_x = tf.expand_dims(coords, axis = -2)
     coords_y = tf.expand_dims(coords, axis = -1)
     coords_r = tf.sqrt(tf.square(coords_x) + tf.square(coords_y))
     
-    psf = gaussian(coords_r, variance = tf.square(standard_deviation))
-    #psf = 0.5 - coords_r
+    psf = function_of_radius(coords_r)
 
     psf = psf / tf.reduce_sum(psf)
     psf = tf.expand_dims(psf, axis = -1)
     return psf
+
+# a square, centered PSF, with standard deviation in terms of the dimension of the square
+def gaussian_psf(size, standard_deviation = .1):
+    variance = tf.square(standard_deviation)
+    return radially_symmetric_psf(size, lambda radius : gaussian(radius, variance = variance))
+
+# a triangle or tent kernel, with radius in terms of the dimension of the square
+def tent_psf(size, radius = .5):
+    return radially_symmetric_psf(size, lambda radius : tf.math.maximum(0, .5 - radius))
 
 
 def gaussian_kernel_2d(size, standard_deviation):
@@ -82,7 +87,7 @@ def crop_image(image, crop, crop_align, crop_offsets = None, crop_center = None)
     return image
 
 def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, crop_center = None, color_balance = True, demosaic = True, frame_index = None):
-    print("Reading", filename, "frame " + str(frame_index) if frame_index is not None else "")
+    #print("Reading", filename, "frame " + str(frame_index) if frame_index is not None else "")
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
         image = Image.open(filename)        
         image = np.array(image)
@@ -167,11 +172,13 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
         
     return image
 
+# todo: proper glob support, so callers don't have to do that themselves, and we can support skip and step on things like image*.cr2
 class ImageSequenceReader:
-    def __init__(self, filename, skip = 0, **kwargs):
+    def __init__(self, filename, skip = 0, step = 1, **kwargs):
         self.filename = filename
         self.kwargs = kwargs
-        self.skip = 0 if skip is None else skip
+        self.skip = 0
+        self.step = step
 
     def __iter__(self):
         self.current_frame_index = self.skip
@@ -185,7 +192,7 @@ class ImageSequenceReader:
         if self.current_frame_index >= self.num_frames:
             raise StopIteration
         image = read_image(self.filename, frame_index = self.current_frame_index, **self.kwargs)
-        self.current_frame_index += 1
+        self.current_frame_index += self.step
         return image, self.current_frame_index - 1
 
 
@@ -377,11 +384,11 @@ def real_to_complex(t):
 def signal_fftshift_2d(x):
     return tf.roll(x, shift = [int(x.shape[-2] // 2), int(x.shape[-1] // 2)], axis = [-2, -1])
 
-def load_average_image(file_glob, frame_limit = None):
+def load_average_image(file_glob, frame_limit = None, step = 1):
     average_image = None
     image_count = 0
     for filename in glob.glob(file_glob):
-        for image_hwc, frame_index in ImageSequenceReader(filename, to_float = True, demosaic = True):           
+        for image_hwc, frame_index in ImageSequenceReader(filename, step = step, to_float = True, demosaic = True):           
 
             if average_image is None:
                 average_image = tf.Variable(tf.zeros_like(image_hwc))
