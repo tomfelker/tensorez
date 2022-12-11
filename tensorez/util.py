@@ -218,7 +218,7 @@ def write_image(image, filename, normalize = False, saturate = True, frequency_d
         print(f'max was {max_val.numpy()}, normalizing') 
         image = image / max_val
     if saturate:
-        image = tf.minimum(1.0, image)
+        image = tf.maximum(0.0, tf.minimum(1.0, image))
     image = promote_to_three_channels(image)
     image_srgb = tfg.image.color_space.srgb.from_linear_rgb(image) * 255.0  #hmm, correct rounding?
     image_srgb_int = tf.cast(image_srgb, tf.uint8)
