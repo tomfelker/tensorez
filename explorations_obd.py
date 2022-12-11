@@ -26,7 +26,7 @@ dark_frame_limit = None
 max_align_steps = 50
 only_even_shifts = False
 # (power of 2) + 1 is most efficient
-psf_size = 512+1
+psf_size = 256+1
 
 
 ###############################################################################
@@ -67,7 +67,9 @@ psf_size = 512+1
 
 #file_glob = os.path.join('data', '2021-10-15_jupiter_prime_crop', '2021-10-16-0428_1-CapObj.SER'); crop = (1024, 1024); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime_crop', '2021-10-16-0430_9-CapObj.SER');
 
-file_glob = os.path.join('data', '2021-10-15_jupiter_prime', '2021-10-16-0439_9-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', '2021-10-16-0441_0-CapObj.SER');
+#file_glob = os.path.join('data', '2021-10-15_jupiter_prime', '2021-10-16-0439_9-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', '2021-10-16-0441_0-CapObj.SER');
+
+file_glob = os.path.join('data', '2022-12-07_moon_mars_conjunction', '2022-12-08-0742_7-CapObj.SER'); crop = (512, 512)
 
 ###############################################################################
 # Code

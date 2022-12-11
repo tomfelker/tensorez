@@ -49,11 +49,11 @@ def generate_mask_image(shape_bhwc, **kwargs):
     return mask_image_bhwc
 
 
-def generate_mask_image_1d(size, border_fraction = .1, dtype = tf.float32):
+def generate_mask_image_1d(size, border_fraction = .1, ramp_fraction = .1, dtype = tf.float32):
 
-    mask_image_1d = tf.linspace(0.0, 1.0, size)
-    mask_image_1d = tf.minimum(mask_image_1d, 1 - mask_image_1d)
-    mask_image_1d = tf.greater(mask_image_1d, border_fraction)
+    mask_image_1d = tf.linspace(0.0, 1.0 / ramp_fraction, size)
+    mask_image_1d = tf.minimum(mask_image_1d, 1.0 / ramp_fraction - mask_image_1d)
+    mask_image_1d = tf.clip_by_value(mask_image_1d - border_fraction / ramp_fraction, 0, 1)
     mask_image_1d = tf.cast(mask_image_1d, dtype)
 
     return mask_image_1d
