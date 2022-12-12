@@ -1,7 +1,8 @@
 import glob
 import fnmatch
-import ser_format
+import tensorez.ser_format as ser_format
 from tensorez.util import read_image
+import tensorflow as tf
 
 class ImageSequence:
     # @param fileglobs is a list of, wildcard filenames of images or videos, or ImageSequences
@@ -35,7 +36,7 @@ class ImageSequence:
         else:
             self.raw_frame_count = end_frame
 
-        self.cooked_frame_count = self.raw_to_cooked_index(self.raw_frame_count)
+        self.cooked_frame_count = int((self.raw_frame_count - self.start_raw_frame) / self.raw_frame_step)
 
     def cooked_to_raw_index(self, cooked_index):
         raw_index = self.start_raw_frame + cooked_index * self.raw_frame_step
@@ -99,6 +100,30 @@ class ImageSequence:
     def __iter__(self):
         return ImageSequence.Iter(self)
 
+    def __len__(self):
+        return self.cooked_frame_count
+
+    def __getitem__(self, index):
+        return self.read_image(index)
+
     # this lets you do, e.g.:  for image in image_sequence.with_read_image_args(normalize = True)
     def with_read_image_args(self, **kwargs):
         return ImageSequence.Iter(self, kwargs)
+
+    def read_average_image(self):
+        average_image = None
+        image_count = 0
+        for image_hwc in self:
+            if average_image is None:
+                average_image = tf.Variable(tf.zeros_like(image_hwc))
+                
+            average_image.assign(average_image + image_hwc)
+
+            image_count += 1
+            print(f"Averaging, finished reading image {image_count} of {self.cooked_frame_count}")
+            
+        if image_count == 0:
+            raise RuntimeError(f"Couldn't load any images.")
+        average_image.assign(average_image * (1.0 / image_count))
+        return average_image
+

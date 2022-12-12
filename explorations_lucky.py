@@ -17,6 +17,7 @@ import time
 import string
 import math
 from tensorez.util import *
+from tensorez.image_sequence import *
 from tensorez.model import *
 from tensorez.bayer import *
 from tensorez.fourier import *
@@ -25,26 +26,20 @@ from tensorez.obd import *
 ###############################################################################
 # Settings
 align_by_center_of_mass = True
-file_glob_darks = None
 crop = None
 
 only_even_shifts = False
 max_align_steps = 50
 
-light_frame_limit = None
-light_frame_skip = None
-dark_frame_limit = None
-debug_frame_limit = 5
-
 max_freq = 1 / 5
 min_freq = 1 / 50
 
-quantiles = [0.00000001, .01, .05, .1, .3, .5]
+quantiles = [0, .01, .05, .1, .3, .5, .9, 1]
 
 ###############################################################################
 # Data selection
 
-file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.dark.SER'); crop = (2048, 2048)
+#file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.dark.SER'); crop = (2048, 2048)
 #file_glob = os.path.join('data', '2021-10-15_jupiter_prime_crop', '*.light.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_prime_crop', '*.dark.SER'); crop = (512, 512)
 #file_glob = os.path.join('data', '2021-10-15_jupiter_barlow3x', '2021-10-16-0501_0-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_jupiter_barlow3x', '2021-10-16-0506_5-CapObj.SER');
 #file_glob = os.path.join('data', '2021-10-15_saturn_prime_crop', '2021-10-16-0445_8-CapObj.SER'); file_glob_darks = os.path.join('data', '2021-10-15_saturn_prime_crop', '2021-10-16-0448_0-CapObj.SER');
@@ -54,9 +49,12 @@ file_glob = os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER
 
 #file_glob = os.path.join('data', '2022-12-07_moon_mars_conjunction', '2022-12-08-0742_7-CapObj.SER'); #crop = (512, 512); #file_glob_darks = os.path.join('data', '2022-12-07_moon_mars_conjunction', '2022-12-08-0746_0-CapObj.SER')
 
-#file_glob = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER'); crop = (512, 512); file_glob_darks = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER')
-#file_glob = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'lights', '*.SER'); crop = (1024, 1024); file_glob_darks = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'darks', '*.SER')
+# Mars, directly imaged, near opposition, somewhat dewy lens
+lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER'), frame_step = 1)
+darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER'), frame_step = 1)
+crop = (512, 512)
 
+#file_glob = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'lights', '*.SER'); crop = (1024, 1024); file_glob_darks = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'darks', '*.SER')
 #file_glob = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'stars', '*.SER'); crop = (1024, 1024); light_frame_limit = 1328; #file_glob_darks = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER')
 #file_glob = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'stars', '*.SER'); crop = (1024, 1024); #file_glob_darks = os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'darks', '*.SER')
 
@@ -116,107 +114,77 @@ def get_fft_weights_chw(shape):
     bandpass = tf.cast(tf.logical_and(highpass, lowpass), dtype = tf.float32)
     return tf.expand_dims(bandpass, axis = [-3])
     
-
-dark_image = None
-if file_glob_darks is not None:
-    dark_image, image_count = load_average_image(file_glob_darks, frame_limit = dark_frame_limit)
-    write_image(dark_image, os.path.join(output_dir, 'dark.png'))
-    write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
-
-image_count = 0
-average_chw = None
-fft_weights_chw = None
-ratings = []
-for filename in glob.glob(file_glob):
-    for image_hwc, frame_index in ImageSequenceReader(filename, skip = light_frame_skip, to_float = True, demosaic = True):           
-        image_count += 1
-
-        if light_frame_limit is not None and image_count > light_frame_limit:
-            break
+def compute_ratings(lights, dark_image):
+    fft_weights_chw = None
+    ratings = []
+    for image_index, image_hwc in enumerate(lights):
 
         if dark_image is not None:
             image_hwc -= dark_image
-
         image_hwc = process_image(image_hwc, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
-
         image_chw = hwc_to_chw(image_hwc)
-
-        if average_chw is None:
-            average_chw = tf.Variable(tf.zeros_like(image_chw))
 
         if fft_weights_chw is None:
             fft_weights_chw = get_fft_weights_chw(image_chw.shape)
             write_image(chw_to_hwc(fft_weights_chw), os.path.join(output_dir, 'fft_weights.png'), normalize = True)
 
-        average_chw.assign(average_chw + image_chw)
-
         rating = rate_image(image_chw, fft_weights_chw)
         ratings.append(rating.numpy()[0])
 
-        print(f"finished pass 1 step {image_count}, rating was {rating}")
+        print(f"Image {image_index + 1} of {len(lights)} has rating {rating}")
+    return ratings
 
 
-if image_count == 0:
-    raise RuntimeError(f"Couldn't load any images from '{file_glob}'.")      
+dark_image = None
+if darks is not None:
+    dark_image = darks.read_average_image()
+    write_image(dark_image, os.path.join(output_dir, 'dark.png'))
+    write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
 
-average_chw.assign(average_chw * (1.0 / image_count))
+ratings = compute_ratings(lights, dark_image)
 
-write_image(chw_to_hwc(average_chw), os.path.join(output_dir, 'average.png'), normalize = True)
+rating_and_index_pairs = []
+for index, rating in enumerate(ratings):
+    rating_and_index_pairs.append((rating, index))
 
-#todo: if we had random access to images, we could spit out tons of quantiles in one pass / with only one sum...
-# but for now, just do several discrete steps, with more memory cost.
+rating_and_index_pairs.sort(reverse = True)
 
-sorted_ratings = sorted(ratings, reverse = True)
-
-quantile_rating_cutoffs = []
-for quantile in quantiles:
-    quantile_rating_cutoffs.append(sorted_ratings[int(quantile * len(ratings))])
-
+image_sum = None
 image_count = 0
-quantile_images_hwc = None
-quantile_counts = None
-for filename in glob.glob(file_glob):
-    for image_hwc, frame_index in ImageSequenceReader(filename, skip = light_frame_skip, to_float = True, demosaic = True):           
-        image_count += 1
-        image_index = image_count - 1
+quantile_index = 0
+for rank, (rating, image_index) in enumerate(rating_and_index_pairs):
+    write_file = False    
+    quantile = quantiles[quantile_index]
+    if (rank / len(ratings) >= quantile) or (rank == len(ratings) - 1):
+        write_file = True
+        quantile_index += 1
 
-        if light_frame_limit is not None and image_count > light_frame_limit:
-            break
+    print(f"Loading the {rank + 1}th best image, rating {rating}, index {image_index}")
+    
+    image_hwc = lights.read_image(image_index)
+    if dark_image is not None:
+        image_hwc -= dark_image
+    image_hwc = process_image(image_hwc, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+    image_count += 1
 
-        need_processing = False
+    if image_sum is None:
+        image_sum = tf.Variable(tf.zeros_like(image_hwc))
 
-        for quantile_index, quantile in enumerate(quantiles):
-            if ratings[image_index] >= quantile_rating_cutoffs[quantile_index]:
-                need_processing = True
-                break
+    image_sum.assign(image_sum + image_hwc)
 
-        if not need_processing:
-            continue
-
-        if dark_image is not None:
-            image_hwc -= dark_image
+    if write_file:
+        image_average = image_sum * (1.0 / image_count)
         
-        image_hwc = process_image(image_hwc, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+        if quantile == 1:            
+            quantile_str = 'mean'
+        elif quantile == 0:
+            quantile_str = 'best_frame'
+        else:
+            quantile_str = f"best_{quantile:f}".replace('0.', 'point_')
+        filename = f"{quantile_str}_including_{image_count}_of_{len(ratings)}.png"
 
-        if quantile_images_hwc is None:
-            quantile_images_hwc = []
-            quantile_counts = []
-            for quantile in quantiles:
-                quantile_images_hwc.append(tf.Variable(tf.zeros_like(image_hwc)))
-                quantile_counts.append(0)
+        write_image(image_average, os.path.join(output_dir, filename))
 
-        for quantile_index, quantile in enumerate(quantiles):
-            if ratings[image_index] >= quantile_rating_cutoffs[quantile_index]:
-                quantile_images_hwc[quantile_index].assign(quantile_images_hwc[quantile_index] + image_hwc)
-                quantile_counts[quantile_index] += 1
-                
-        print(f"finished pass 2 step {image_count}")
+    if quantile_index >= len(quantiles):
+        break
 
-
-for quantile_index, quantile in enumerate(quantiles):
-    quantile_images_hwc[quantile_index].assign(quantile_images_hwc[quantile_index] * (1.0 / quantile_counts[quantile_index]))
-
-for quantile_index, quantile in enumerate(quantiles):
-    quantile_percent_str = str(quantile * 100).replace('.', '_point_')
-    filename = f"top_{quantile_percent_str}_percent_{quantile_counts[quantile_index]}_of_{len(ratings)}.png"
-    write_image(quantile_images_hwc[quantile_index], os.path.join(output_dir, filename))
