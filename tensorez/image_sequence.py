@@ -36,7 +36,7 @@ class ImageSequence:
         else:
             self.raw_frame_count = end_frame
 
-        self.cooked_frame_count = int((self.raw_frame_count - self.start_raw_frame) / self.raw_frame_step)
+        self.cooked_frame_count = int((self.raw_frame_count - 1 - self.start_raw_frame) / self.raw_frame_step) + 1
 
     def cooked_to_raw_index(self, cooked_index):
         raw_index = self.start_raw_frame + cooked_index * self.raw_frame_step
