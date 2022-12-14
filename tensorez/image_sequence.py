@@ -31,9 +31,8 @@ class ImageSequence:
             self.filenames_and_raw_start_frames.append((filename, start_raw_frame_for_file))
             start_raw_frame_for_file += self.get_frame_count(filename)
 
-        if end_frame is None:
-            self.raw_frame_count = start_raw_frame_for_file
-        else:
+        self.raw_frame_count = start_raw_frame_for_file
+        if end_frame is not None and end_frame < self.raw_frame_count:
             self.raw_frame_count = end_frame
 
         self.cooked_frame_count = int((self.raw_frame_count - 1 - self.start_raw_frame) / self.raw_frame_step) + 1
