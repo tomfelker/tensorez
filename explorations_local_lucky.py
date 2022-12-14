@@ -26,6 +26,7 @@ distribution of luckiness.
 """
 
 
+from threading import currentThread
 from tkinter import N
 import numpy as np
 import tensorflow as tf
@@ -43,18 +44,39 @@ from tensorez.obd import *
 # Settings
 align_by_center_of_mass = True
 crop = None
+darks = None
 
 only_even_shifts = False
 max_align_steps = 50
 
-debug_frames = 10
+debug_frames = 2
 
 ###############################################################################
 # Data selection
 
-# Mars, directly imaged, near opposition, somewhat dewy lens
+# Moon, directly imaged, near opposition, somewhat dewy lens
 lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step=1, end_frame=30)
-darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER'), frame_step=1, end_frame=10)
+darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER'), frame_step=1, end_frame=30)
+align_by_center_of_mass = False
+
+# Mars, directly imaged, near opposition, somewhat dewy lens
+#lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER'), frame_step=1, end_frame=None)
+#darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER'), frame_step=1, end_frame=None)
+#align_by_center_of_mass = True
+#crop = (512, 512)
+
+# Mars, barlow, near opposition, somewhat dewy lens
+#lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'lights', '*.SER'), frame_step=1, end_frame=None)
+#darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_3x', 'darks', '*.SER'), frame_step=1, end_frame=None)
+#align_by_center_of_mass = True
+#crop = (1024, 1024)
+
+
+# Jupiter
+#lights = ImageSequence(os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.light.SER'), end_frame = None)
+#darks = ImageSequence(os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter*.dark.SER'), end_frame = None)
+#align_by_center_of_mass = True
+#crop = (2048, 2048)
 
 ###############################################################################
 # Functions
@@ -80,16 +102,29 @@ def process_image(image_hwc, align_by_center_of_mass, crop):
 
     return image_hwc
 
+@tf.function
+def compute_luckiness(image_chw, known_image_chw, known_frequency_mask, interesting_frequency_mask, agreement_factor):
 
-def compute_luckiness(image_chw, known_image_chw, known_frequency_mask, interesting_frequency_mask):
-    agreement_factor = 1
-    interestingness_factor = 1
+    # this seems to better
+    #squared_error_from_known = tf.abs(image_chw - known_image_chw)
+    #agreement_image = apply_frequency_mask(squared_error_from_known, known_frequency_mask)
 
-    squared_error_from_known = tf.abs(image_chw - known_image_chw)
-    agreement_image = apply_frequency_mask(squared_error_from_known, known_frequency_mask)
+    # than this.  I think that problem is that in this version, if an edge has moved, there will
+    # be a narrow band where difference is 0.
+    #known_part_of_image = apply_frequency_mask(image_chw, known_frequency_mask)
+    #agreement_image = tf.abs(known_part_of_image - known_image_chw)
+    
+    # wait, wouldn't we want agreement to be high?
+    # that was dumb...
+
+    # okay this is not principled
+    #squared_error_from_known = tf.abs(image_chw - known_image_chw)
+    #disagreement_image = apply_frequency_mask(squared_error_from_known, known_frequency_mask)
+    #agreement_image = tf.math.sigmoid(-disagreement_image * agreement_factor)
+
+    # now for interestingness
 
     highpass_image = apply_frequency_mask(image_chw, interesting_frequency_mask)
-
     # In theory, if we then take the lowpass, we'll just get zero... but that's just because
     # our image looks 0 from across the room, since what was a sharp rising edge from 0 to 1 has become
     # a gentle fall to -0.5, a sharp rise to 0.5, and a gentle fall back to 0, so it all cancels out.
@@ -97,75 +132,91 @@ def compute_luckiness(image_chw, known_image_chw, known_frequency_mask, interest
 
     # Not sure whether this should be abs() or square(), but it should probably match
     # what we did to agreement_image above.
-
     edgey_image = tf.abs(highpass_image)
 
     interestingness_image = apply_frequency_mask(edgey_image, known_frequency_mask)
 
     # hmm, plus or times?  (times would need some other way of handling the factors...)
-    luckiness = agreement_image * agreement_factor * interestingness_image * interestingness_factor
+    #luckiness = agreement_image * agreement_factor * interestingness_image * interestingness_factor
+    luckiness = interestingness_image #* agreement_image
     return luckiness   
 
 
 def local_lucky(
     lights,
     darks,
-    crossover_wavelength_pixels = 20,
-    noise_wavelength_pixels = 3,
+    crossover_wavelength_pixels = 30,
+    noise_wavelength_pixels = 16,
+    agreement_factor = 0,  # todo: this?
     steepness = 3,
     stdevs_above_mean = 3
 ):
-    average_image = lights.read_average_image()
-    write_image(average_image, os.path.join(output_dir, 'average.png'))
-
     dark_image = None
     if darks is not None:
         dark_image = darks.read_average_image()
         write_image(dark_image, os.path.join(output_dir, 'dark.png'))
         write_image(dark_image, os.path.join(output_dir, 'dark_normalized.png'), normalize = True)
-        average_image = average_image - dark_image
 
-    average_image_chw = hwc_to_chw(average_image)
-    shape_chw = average_image_chw.shape
+    average_image = None
+    for image_index ,image in enumerate(lights):
+        if dark_image is not None:
+            image -= dark_image
+        image = process_image(image, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+        image = hwc_to_chw(image)
 
-    known_frequency_mask = get_lowpass_frequency_mask(shape_chw, crossover_wavelength_pixels)
+        if average_image is None:
+            average_image = tf.Variable(tf.zeros_like(image))
+            
+        average_image.assign_add(image)
+        print(f"Processed and averaged light frame {image_index + 1} of {len(lights)}")
+    average_image.assign(average_image / len(lights))
+
+    write_image(chw_to_hwc(average_image), os.path.join(output_dir, 'average.png'))
+
+    shape = average_image.shape
+
+    known_frequency_mask = get_gaussian_lowpass_frequency_mask(shape, crossover_wavelength_pixels)
     write_image(chw_to_hwc(known_frequency_mask), os.path.join(output_dir, 'known_frequency_mask.png'))
 
-    interesting_frequency_mask = get_bandpass_frequency_mask(shape_chw, noise_wavelength_pixels, crossover_wavelength_pixels)
+    interesting_frequency_mask = get_gaussian_bandpass_frequency_mask(shape, noise_wavelength_pixels, crossover_wavelength_pixels)
     write_image(chw_to_hwc(interesting_frequency_mask), os.path.join(output_dir, 'interesting_frequencies.png'))
     
-    known_image_chw = apply_frequency_mask(average_image_chw, known_frequency_mask)
+    known_image_chw = apply_frequency_mask(average_image, known_frequency_mask)
     write_image(chw_to_hwc(known_image_chw), os.path.join(output_dir, 'known_image.png'))
 
-    luckiness_variance_state = welfords_init(shape_chw)
+    luckiness_variance_state = welfords_init(shape)
+
+    # todo: refactor these passes into functions for cleanliness / gc-ability
 
     # first pass
     for image_index, image in enumerate(lights):
         if dark_image is not None:
             image = image - dark_image
-        image_chw = hwc_to_chw(image)
+        image = process_image(image, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+        image = hwc_to_chw(image)
 
-        luckiness_chw = compute_luckiness(image_chw, known_image_chw, known_frequency_mask, interesting_frequency_mask)
+        luckiness = compute_luckiness(image, known_image_chw, known_frequency_mask, interesting_frequency_mask, agreement_factor)
         if image_index < debug_frames:
-            write_image(chw_to_hwc(luckiness_chw), os.path.join(output_dir, "luckiness_{:08d}.png".format(image_index)), normalize = True)
+            write_image(chw_to_hwc(luckiness), os.path.join(output_dir, "luckiness_{:08d}.png".format(image_index)), normalize = True)
 
-        luckiness_variance_state = welfords_update(luckiness_variance_state, luckiness_chw)
+        luckiness_variance_state = welfords_update(luckiness_variance_state, luckiness)
+        print(f"Pass 1 of 2, processed image {image_index + 1} of {len(lights)}")
 
     luckiness_mean = welfords_get_mean(luckiness_variance_state)
-    luckiness_variance = welfords_get_variance(luckiness_variance_state)
-    luckiness_stdev = tf.sqrt(luckiness_variance)
+    luckiness_stdev = welfords_get_stdev(luckiness_variance_state)
 
     # second pass
-    total_weight = tf.zeros(shape_chw)
-    weighted_sum = tf.zeros(shape_chw)
+    total_weight = tf.Variable(tf.zeros(shape))
+    weighted_avg = tf.Variable(tf.zeros(shape))
     for image_index, image in enumerate(lights):
         if dark_image is not None:
             image = image - dark_image
-        image_chw = hwc_to_chw(image)
+        image = process_image(image, align_by_center_of_mass = align_by_center_of_mass, crop = crop)
+        image = hwc_to_chw(image)
 
-        luckiness_chw = compute_luckiness(image_chw, known_image_chw, known_frequency_mask, interesting_frequency_mask)
+        luckiness = compute_luckiness(image, known_image_chw, known_frequency_mask, interesting_frequency_mask, agreement_factor)
     
-        luckiness_zero_mean_unit_variance = (luckiness_chw - luckiness_mean) / luckiness_stdev
+        luckiness_zero_mean_unit_variance = (luckiness - luckiness_mean) / luckiness_stdev
 
         if image_index < debug_frames:
             write_image(chw_to_hwc(luckiness_zero_mean_unit_variance), os.path.join(output_dir, "luckiness_zero_mean_unit_variance_{:08d}.png".format(image_index)), normalize = True)
@@ -175,10 +226,11 @@ def local_lucky(
         if image_index < debug_frames:
             write_image(chw_to_hwc(weight_image), os.path.join(output_dir, "luckiness_weights_{:08d}.png".format(image_index)))
 
-        total_weight += weight_image
-        weighted_sum += weight_image * image_chw
+        total_weight.assign_add(weight_image)
+        weighted_avg.assign_add(weight_image * image)
+        print(f"Pass 2 of 2, processed image {image_index + 1} of {len(lights)}")
 
-    weighted_avg = weighted_sum / total_weight
+    weighted_avg.assign(weighted_avg / total_weight)
     write_image(chw_to_hwc(weighted_avg), os.path.join(output_dir, "weighted_avg.png"))
 
 
@@ -201,8 +253,8 @@ def apply_frequency_mask(image_chw, mask_chw):
 def fft_spatial_frequencies_per_pixel(shape_chw):
     w = shape_chw[-1]
     h = shape_chw[-2]
-    freqs_x = tf.convert_to_tensor(np.fft.fftfreq(w))
-    freqs_y = tf.convert_to_tensor(np.fft.fftfreq(h))
+    freqs_x = tf.convert_to_tensor(np.fft.fftfreq(w), dtype = tf.float32)
+    freqs_y = tf.convert_to_tensor(np.fft.fftfreq(h), dtype = tf.float32)
     freqs_x = tf.expand_dims(freqs_x, axis = [-2])
     freqs_y = tf.expand_dims(freqs_y, axis = [-1])
     freqs = tf.sqrt(freqs_x * freqs_x + freqs_y * freqs_y)
@@ -225,6 +277,21 @@ def get_lowpass_frequency_mask(shape_chw, cutoff_wavelength_pixels):
 def get_bandpass_frequency_mask(shape_chw, min_wavelength_pixels, max_wavelength_pixels):
     return get_highpass_frequency_mask(shape_chw, max_wavelength_pixels) * get_lowpass_frequency_mask(shape_chw, min_wavelength_pixels)
 
+def get_gaussian_lowpass_frequency_mask(shape_chw, cutoff_wavelength_pixels):
+    freqs = fft_spatial_frequencies_per_pixel(shape_chw)
+    lowpass = gaussian(freqs, mean = 0, variance = tf.square(1.0 / cutoff_wavelength_pixels))
+    lowpass /= gaussian(0, mean = 0, variance = tf.square(1.0 / cutoff_wavelength_pixels))
+    lowpass = tf.expand_dims(lowpass, axis = [-3])
+    return lowpass
+
+def get_gaussian_highpass_frequency_mask(shape_chw, cutoff_wavelength_pixels):
+    return 1 - get_gaussian_lowpass_frequency_mask(shape_chw, cutoff_wavelength_pixels)
+
+def get_gaussian_bandpass_frequency_mask(shape_chw, min_wavelength_pixels, max_wavelength_pixels):
+    return get_gaussian_highpass_frequency_mask(shape_chw, max_wavelength_pixels) * get_gaussian_lowpass_frequency_mask(shape_chw, min_wavelength_pixels)
+
+
+
 # Straight from https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm.
 # Interestingly, the very functional-programming style they used is perfect for avoiding tf.function weirdness.
 
@@ -235,6 +302,7 @@ def welfords_init(shape):
     M2 = tf.zeros(shape)
     return (count, mean, M2)
 
+@tf.function
 def welfords_update(existingAggregate, newValue):
     (count, mean, M2) = existingAggregate
     count += 1
@@ -251,6 +319,11 @@ def welfords_get_mean(existingAggregate):
 def welfords_get_variance(existingAggregate):
     (count, mean, M2) = existingAggregate
     return M2 / count
+
+def welfords_get_stdev(existingAggregate):
+    (count, mean, M2) = existingAggregate
+    return tf.sqrt(M2 / count)
+
 
 
 ###############################################################################
