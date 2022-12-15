@@ -5,6 +5,8 @@ import fnmatch
 import os
 import glob
 import math
+import datetime
+import sys
 
 #from tensorez.ser_format import *
 import tensorez.ser_format as ser_format
@@ -15,6 +17,23 @@ try:
     import rawpy
 except:
     print("Failed to import RawPY, needed for raw (CR2, etc.) support...")
+
+
+def create_timed_output_dir(name):
+    output_dir = os.path.join("output", name, datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
+
+    os.makedirs(output_dir, exist_ok = True)
+    try:    
+        import tee    
+        tee.StdoutTee(os.path.join(output_dir, 'log.txt'), buff = 1).__enter__()
+        sys.stderr = sys.stdout
+    except ModuleNotFoundError:
+        print("Warning: to generate log.txt, need to install tee.")
+        pass
+
+    return output_dir
+
+
 
 def map_along_tensor_axis(func, tensor, axis, keepdims = False):
     if keepdims:
@@ -302,6 +321,20 @@ def center_of_mass(image, collapse_channels = True, only_above_average = True):
             ret = tf.concat([ret, com_in_dim], axis = -2)
     #print(ret)
     return ret
+
+@tf.function
+def align_by_center_of_mass(image_hwc, max_align_steps = tf.constant(10, dtype = tf.uint32), only_even_shifts = False):
+    for align_step in tf.range(max_align_steps):
+        image_hwc, shift, shift_axis = center_image(image_hwc, only_even_shifts = only_even_shifts)
+        #tf.print("Shifted by ", shift)
+        if tf.reduce_max(tf.abs(shift)) < (2 if only_even_shifts else 1):
+            #tf.print("Centered after ", align_step, " steps.")
+            break
+        if align_step + 1 >= max_align_steps:
+            tf.print("Alignment didn't converge after ", align_step + 1, " steps.")
+            break
+    return image_hwc
+    
 
 def pad_image(image, pad):
     if pad is not 0:
