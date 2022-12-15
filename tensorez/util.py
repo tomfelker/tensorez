@@ -404,3 +404,9 @@ def load_average_image(file_glob, frame_limit = None, step = 1):
 
     average_image.assign(average_image * (1.0 / image_count))
     return average_image, image_count
+
+@tf.function
+def image_with_zero_mean_and_unit_variance(image_bhwc):
+    mean, variance = tf.nn.moments(image_bhwc, axes = (-3, -2))
+    stdev = tf.sqrt(variance)
+    return (image_bhwc - mean) / stdev
