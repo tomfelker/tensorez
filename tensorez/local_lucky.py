@@ -58,13 +58,23 @@ def local_lucky(
     if debug_output_dir is not None:
         write_image(chw_to_hwc(interesting_frequency_mask), os.path.join(debug_output_dir, 'interesting_frequencies.png'))
     
+    luckiness_mean, luckiness_stdev = pass_1(shape, lights, known_frequency_mask, interesting_frequency_mask, debug_output_dir, debug_frames)
+
+    weighted_avg = pass_2(shape, lights, luckiness_mean, luckiness_stdev, known_frequency_mask, interesting_frequency_mask, stdevs_above_mean, steepness, debug_output_dir, debug_frames)
+
+    return chw_to_hwc(weighted_avg)
+
+def pass_1(shape, lights, known_frequency_mask, interesting_frequency_mask, debug_output_dir, debug_frames):
     luckiness_variance_state = welfords_init(shape)
+    image_avg = tf.Variable(tf.zeros(shape))
 
     # todo: refactor these passes into functions for cleanliness / gc-ability
 
     # first pass
     for image_index, image in enumerate(lights):
         image = hwc_to_chw(image)
+
+        image_avg.assign_add(image)
 
         luckiness = compute_luckiness(image, known_frequency_mask, interesting_frequency_mask)
         if debug_output_dir is not None and image_index < debug_frames:
@@ -73,9 +83,18 @@ def local_lucky(
         luckiness_variance_state = welfords_update(luckiness_variance_state, luckiness)
         print(f"Pass 1 of 2, processed image {image_index + 1} of {len(lights)}")
 
+    image_avg.assign(image_avg / len(lights))
+
+    if debug_output_dir is not None:
+        write_image(chw_to_hwc(image_avg), os.path.join(debug_output_dir, 'unweighted_avg.png'))
+
     luckiness_mean = welfords_get_mean(luckiness_variance_state)
     luckiness_stdev = welfords_get_stdev(luckiness_variance_state)
 
+    return luckiness_mean, luckiness_stdev
+
+
+def pass_2(shape, lights, luckiness_mean, luckiness_stdev, known_frequency_mask, interesting_frequency_mask, stdevs_above_mean, steepness, debug_output_dir, debug_frames):
     # second pass
     total_weight = tf.Variable(tf.zeros(shape))
     weighted_avg = tf.Variable(tf.zeros(shape))
@@ -100,9 +119,12 @@ def local_lucky(
 
     weighted_avg.assign(weighted_avg / total_weight)
     if debug_output_dir is not None:
-        write_image(chw_to_hwc(weighted_avg), os.path.join(debug_output_dir, "weighted_avg.png"))
+        avg_num_frames = tf.reduce_mean(total_weight)
+        write_image(chw_to_hwc(weighted_avg), os.path.join(debug_output_dir, f"local_lucky_{stdevs_above_mean}_stdevs_{steepness}_steepness_{int(avg_num_frames)}_of_{len(lights)}.png"))
+        write_image(chw_to_hwc(total_weight), os.path.join(debug_output_dir, "total_weight.png"), normalize = True)
 
-    return chw_to_hwc(weighted_avg)
+    return weighted_avg
+
 
 @tf.function
 def compute_luckiness(image_chw, known_frequency_mask, interesting_frequency_mask):

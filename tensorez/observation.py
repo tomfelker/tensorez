@@ -7,7 +7,7 @@ import os.path
 import numpy as np
 
 class Observation:
-    def __init__(self, lights, darks = None, align_by_center_of_mass = False, crop = None, crop_align = 0, crop_before_align = False):
+    def __init__(self, lights, darks = None, align_by_center_of_mass = False, crop = None, crop_align = 1, crop_before_align = False):
         self.lights = lights
         self.darks = darks
         self.align_by_center_of_mass = align_by_center_of_mass

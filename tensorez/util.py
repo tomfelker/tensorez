@@ -323,7 +323,7 @@ def center_of_mass(image, collapse_channels = True, only_above_average = True):
     return ret
 
 @tf.function
-def align_by_center_of_mass(image_hwc, max_align_steps = tf.constant(10, dtype = tf.uint32), only_even_shifts = False):
+def align_by_center_of_mass(image_hwc, max_align_steps = 10, only_even_shifts = False):
     for align_step in tf.range(max_align_steps):
         image_hwc, shift, shift_axis = center_image(image_hwc, only_even_shifts = only_even_shifts)
         #tf.print("Shifted by ", shift)

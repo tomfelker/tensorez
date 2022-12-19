@@ -12,6 +12,8 @@ data/**/*.ser
 data/**/*.ser.txt
 data/**/*.fit
 data/**/*.txt
+data/**/*.npy
+gallery/**
 obd/**
 output/*
 **/__pycache__/*
