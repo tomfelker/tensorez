@@ -19,7 +19,7 @@ except:
     print("Failed to import RawPY, needed for raw (CR2, etc.) support...")
 
 
-def create_timed_output_dir(name):
+def create_timestamped_output_dir(name):
     output_dir = os.path.join("output", name, datetime.datetime.now().replace(microsecond = 0).isoformat().replace(':', '_'))
 
     os.makedirs(output_dir, exist_ok = True)
@@ -443,3 +443,21 @@ def image_with_zero_mean_and_unit_variance(image_bhwc):
     mean, variance = tf.nn.moments(image_bhwc, axes = (-3, -2))
     stdev = tf.sqrt(variance)
     return (image_bhwc - mean) / stdev
+
+# similar to itertools.islice, but also supports __getitem__() and __len__()
+class LimitedIterable:
+    def __init__(self, iterable_with_len, limit):
+        self.iterable = iterable_with_len
+        self.limit = limit
+    
+    def __getitem__(self, index):
+        if index >= self.limit:
+            raise IndexError
+        return self.iterable.__getitem__(index)
+
+    def __len__(self):
+        return min(self.limit, len(self.iterable))
+
+    def __iter__(self):
+        for i in range(0, len(self)):
+            yield self[i]

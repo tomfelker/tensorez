@@ -92,7 +92,6 @@ def compute_alignment_transforms(
         target_image.assign_sub(dark_image)
     target_image.assign(image_with_zero_mean_and_unit_variance(target_image))
 
-    # todo: middle-out
     for image_index, middleward_index in middle_out(target_image_index, len(lights)):
         image_bhwc = lights[image_index]
         if dark_image is not None:

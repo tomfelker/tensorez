@@ -46,7 +46,7 @@ def local_lucky(
     steepness = 3,
     stdevs_above_mean = 3,
     debug_output_dir = None,
-    debug_frames = 10
+    debug_frames = 10,
 ):
     shape = hwc_to_chw(lights[0]).shape
 
@@ -58,11 +58,92 @@ def local_lucky(
     if debug_output_dir is not None:
         write_image(chw_to_hwc(interesting_frequency_mask), os.path.join(debug_output_dir, 'interesting_frequencies.png'))
     
+    analysis_pass(shape, lights, debug_output_dir, debug_frames, known_frequency_mask, interesting_frequency_mask)
+
     luckiness_mean, luckiness_stdev = pass_1(shape, lights, known_frequency_mask, interesting_frequency_mask, debug_output_dir, debug_frames)
 
     weighted_avg = pass_2(shape, lights, luckiness_mean, luckiness_stdev, known_frequency_mask, interesting_frequency_mask, stdevs_above_mean, steepness, debug_output_dir, debug_frames)
 
     return chw_to_hwc(weighted_avg)
+
+def get_frequency_bins(shape_chw):
+    x = tf.expand_dims(tf.minimum(tf.range(0.0, shape_chw[-1], 1), tf.range(shape_chw[-1] - 1.0, -1, -1)), -2)
+    y = tf.expand_dims(tf.minimum(tf.range(0.0, shape_chw[-2], 1), tf.range(shape_chw[-2] - 1.0, -1, -1)), -1)
+    dist_from_corner = tf.sqrt(tf.square(x) + tf.square(y))
+    dist_from_corner = tf.cast(dist_from_corner, dtype=tf.int32)
+    dist_from_corner = tf.expand_dims(dist_from_corner, axis = -3)
+    dist_from_corner = tf.expand_dims(dist_from_corner, axis = -4)
+    return dist_from_corner
+
+def write_hist(name, data, bins, bins_hist, num_bins, debug_output_dir):
+    hist = tf.math.divide_no_nan(tf.math.bincount(bins, weights = data, minlength=num_bins, maxlength=num_bins), bins_hist)
+    hist = hist / tf.reduce_max(hist)
+    hist_graph = vector_to_graph(hist)
+    write_image(hist_graph, os.path.join(debug_output_dir, f'{name}.png'))
+    return hist_graph
+
+
+def analysis_pass(shape, lights, debug_output_dir, debug_frames, known_frequency_mask, interesting_frequency_mask):
+    frequency_mag_variance_state = welfords_init(shape)
+    
+    bins = get_frequency_bins(shape)
+
+    for image_index, image in enumerate(lights):
+        if image_index >= debug_frames:
+            break
+
+        image = hwc_to_chw(image)
+
+        frequency = spatial_to_frequency_domain(image)
+        frequency_mag = tf.abs(frequency)
+        frequency_mag_variance_state = welfords_update(frequency_mag_variance_state, frequency_mag)
+
+    frequency_mag_mean = welfords_get_mean(frequency_mag_variance_state)
+    frequency_mag_stdev = welfords_get_stdev(frequency_mag_variance_state)
+
+    # discard channel info
+    frequency_mag_mean = tf.reduce_mean(frequency_mag_mean, axis = -3, keepdims=True)
+    frequency_mag_stdev = tf.reduce_mean(frequency_mag_stdev, axis = -3, keepdims=True)
+
+    num_bins = tf.maximum(shape[-1], shape[-2])
+
+    bins_hist = tf.math.bincount(bins, minlength=num_bins, maxlength=num_bins)
+    bins_hist = tf.cast(bins_hist, dtype=tf.float32)
+
+    frequency_mag_hist = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_mean, minlength=num_bins, maxlength=num_bins), bins_hist)
+    frequency_mag_hist_hi = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_mean + frequency_mag_stdev, minlength=num_bins, maxlength=num_bins), bins_hist)
+    frequency_mag_hist_lo = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_mean - frequency_mag_stdev, minlength=num_bins, maxlength=num_bins), bins_hist)
+    frequency_stdev_hist = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_stdev, minlength=num_bins, maxlength=num_bins), bins_hist)
+    frequency_mag_uncertainty_hist = tf.math.divide_no_nan(frequency_stdev_hist, frequency_mag_hist)
+
+    xmax = tf.reduce_max(frequency_mag_hist_hi)
+    frequency_mag_hist /= xmax
+    frequency_mag_hist_hi /= xmax
+    frequency_mag_hist_lo /= xmax
+
+    red = tf.reshape(tf.constant([1.0, 0, 0]), shape=[1, 3, 1, 1])
+    green = tf.reshape(tf.constant([0, 1.0, 0]), shape=[1, 3, 1, 1])
+    blue = tf.reshape(tf.constant([0, 0, 1.0]), shape=[1, 3, 1, 1])
+
+    frequency_mag_hist_chart = vector_to_graph(frequency_mag_hist)
+    frequency_mag_hist_chart += vector_to_graph(frequency_mag_hist_hi) * red
+    frequency_mag_hist_chart += vector_to_graph(frequency_mag_hist_lo) * green
+    write_image(chw_to_hwc(frequency_mag_hist_chart), os.path.join(debug_output_dir, 'histogram_frequency_mag.png'))
+
+    frequency_mag_uncertainty_hist /= tf.reduce_max(frequency_mag_uncertainty_hist)
+    frequency_mag_uncertainty_hist_chart = vector_to_graph(frequency_mag_uncertainty_hist)
+    write_image(frequency_mag_uncertainty_hist_chart, os.path.join(debug_output_dir, 'histogram_frequency_mag_uncertainty.png'))
+
+    histogram_lucky_known = write_hist('histogram_lucky_known', tf.expand_dims(known_frequency_mask, axis = -4), bins, bins_hist, num_bins, debug_output_dir)
+    histogram_lucky_interesting = write_hist('histogram_lucky_interesting', tf.expand_dims(interesting_frequency_mask, axis = -4), bins, bins_hist, num_bins, debug_output_dir)
+
+    write_hist('histogram_mean', frequency_mag_mean, bins, bins_hist, num_bins, debug_output_dir)
+    write_hist('histogram_stdev', frequency_mag_stdev, bins, bins_hist, num_bins, debug_output_dir)
+    histogram_stdev_over_mean = write_hist('histogram_stdev_over_mean', frequency_mag_stdev / frequency_mag_mean, bins, bins_hist, num_bins, debug_output_dir)
+
+    combo = histogram_lucky_known * blue + histogram_lucky_interesting * green + histogram_stdev_over_mean
+    write_image(chw_to_hwc(combo), os.path.join(debug_output_dir, 'histogram_combo.png'))
+
 
 def pass_1(shape, lights, known_frequency_mask, interesting_frequency_mask, debug_output_dir, debug_frames):
     luckiness_variance_state = welfords_init(shape)

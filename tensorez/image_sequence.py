@@ -37,6 +37,16 @@ class ImageSequence:
 
         self.cooked_frame_count = int((self.raw_frame_count - 1 - self.start_raw_frame) / self.raw_frame_step) + 1
 
+    def get_cache_hash_info(self):
+        ret = "ImageSequence:\n"
+        ret += "\tFiles:\n"
+        for filename, start_raw_frame_for_file in self.filenames_and_raw_start_frames:
+            ret += f"\t\t{filename}\n"
+        ret += f"\tstart_raw_frame: {self.start_raw_frame}\n"
+        ret += f"\traw_frame_step: {self.raw_frame_step}\n"
+        ret += f"\traw_frame_count: {self.raw_frame_count}\n"
+        return ret
+
     def cooked_to_raw_index(self, cooked_index):
         raw_index = self.start_raw_frame + cooked_index * self.raw_frame_step
         if raw_index < 0 or raw_index >= self.raw_frame_count:
