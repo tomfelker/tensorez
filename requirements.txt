@@ -3,4 +3,4 @@ tensorflow-gpu
 tensorflow-graphics-gpu
 Pillow
 rawpy
-stn
+matplotlib.pyplot

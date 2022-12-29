@@ -3,4 +3,4 @@ tensorflow
 tensorflow-graphics
 Pillow
 rawpy
-stn
+matplotlib.pyplot
