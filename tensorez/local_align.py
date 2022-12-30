@@ -31,18 +31,10 @@ def compute_alignment_transforms(
     learning_rate_translation = 1e-3,
     # how much to update theta by per mean-squared-error-of-unit-variance
     learning_rate_rotation = 1e-3,
-    # how much to update log_scale by per mean-squared-error-of-unit-variance
-    learning_rate_log_scale = 1e-3,
-    # how much to update skew by per mean-squared-error-of-unit-variance
-    learning_rate_skew = 1e-3,
     # don't update dx or dy by more than this many pixels
     max_update_translation_pixels = 0.9,
     # don't rotate such that we'd move some part of the image by more than this many pixels
     max_update_rotation_pixels = 3,
-    # don't scale such that we'd move some part of the image by more than this many pixels
-    max_update_scale_pixels = 3,
-    # don't skew such that we'd move some part of the image by more than this many pixels
-    max_update_skew_pixels = 3,
     # number of learning stetps per lod
     max_steps = 50,
     # number of high lods to skip
@@ -57,9 +49,6 @@ def compute_alignment_transforms(
     incrementally_improve_target_image = False,
     # if true, normalize all the alignments - otherwise target_image_index would have an alignent of 0 and the others will be aligned as necessary.
     normalize_alignments = False,
-    allow_rotation = True,
-    allow_scale = False,
-    allow_skew = False
 ):
     image_shape = lights[0].shape
     image_hw = image_shape.as_list()[-3:-1]
@@ -87,8 +76,8 @@ def compute_alignment_transforms(
         num_lods += 1
     print(f"num_lods: {num_lods}")
 
-    # [alignment_param_index: dx, dy, theta, log(sx), log(sy), skew]
-    identity_alignment_transform = tf.zeros(6)
+    # [alignment_param_index: dx, dy, theta]
+    identity_alignment_transform = tf.zeros(3)
 
     # [batch, alignment_param_index]
     alignment_transforms = tf.Variable(tf.tile(tf.expand_dims(identity_alignment_transform, axis=0), multiples=(len(lights), 1)))
@@ -123,19 +112,13 @@ def compute_alignment_transforms(
             learning_rate_for_lod = tf.constant([
                 learning_rate_translation * lod_downsample_factor,
                 learning_rate_translation * lod_downsample_factor,
-                learning_rate_rotation * lod_downsample_factor,
-                learning_rate_log_scale * lod_downsample_factor,
-                learning_rate_log_scale * lod_downsample_factor,
-                learning_rate_skew * lod_downsample_factor,
+                learning_rate_rotation * lod_downsample_factor
             ])
 
             max_update_for_lod = tf.constant([
                 max_update_translation_pixels / lod_max_dimension,
                 max_update_translation_pixels / lod_max_dimension,
                 max_update_rotation_pixels / lod_max_dimension,
-                math.log(1.0 + max_update_scale_pixels / lod_max_dimension),
-                math.log(1.0 + max_update_scale_pixels / lod_max_dimension),
-                max_update_skew_pixels / lod_max_dimension,
             ])
 
             max_gradient_for_lod = max_update_for_lod / learning_rate_for_lod
@@ -252,72 +235,19 @@ def generate_mask_image_1d(size, border_fraction = .1, ramp_fraction = .1, dtype
     return mask_image_1d
 
 
-def alignment_transform_to_stn_theta(alignment_transform):
-    """ convert an alignment transform in terms of shift, rotate, scale, and skew into to the style required by STN
-    Arguments:
-        alignment_transform is [dx, dy, theta, log(sx), log(sy), skew]    
-    """
-    delta_x = alignment_transform[0]
-    delta_y = alignment_transform[1]
-    theta_radians = alignment_transform[2]
-    if alignment_transform.shape[-1] == 6:
-        sx = tf.exp(alignment_transform[3])
-        sy = tf.exp(alignment_transform[4])
-        skew_x = alignment_transform[5]
-    else:
-        sx = 1.0
-        sy = 1.0
-        skew_x = 0.0
-
-    translation = tf.reshape(
-        tf.stack([
-            1.0, 0.0, delta_x,
-            0.0, 1.0, delta_y,
-            0.0, 0.0, 1.0
-        ]),
-        (3, 3)
-    )
-
-    rotation = tf.reshape(        
-        tf.stack([
-            tf.cos(theta_radians), -tf.sin(theta_radians), 0,
-            tf.sin(theta_radians), tf.cos(theta_radians), 0,
-            0.0, 0.0, 1.0
-        ]),
-        (3, 3)
-    )
-
-    scale = tf.reshape(
-        tf.stack([
-            sx, 0.0, 0.0,
-            0.0, sy, 0.0,
-            0.0, 0.0, 1.0
-        ]),
-        (3, 3)
-    )
-
-    skew = tf.reshape(
-        tf.stack([
-            1.0, skew_x, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0
-        ]),
-        (3, 3)
-    )
-
-    transform = tf.matmul(tf.matmul(tf.matmul(skew, scale), rotation), translation)
-
-    stn_transform = transform[0:2, :]
-
-    return stn_transform
-
-
-# alignment_transform's last index is [delta_x, delta_y, theta_radians, log_scale_x, log_scale_y, skew_x]
 @tf.function
 def transform_image(unaligned_image_bhwc, alignment_transform):
 
-    
-    return stn.spatial_transformer_network(unaligned_image_bhwc, alignment_transform_to_stn_theta(alignment_transform))
+    dx = alignment_transform[0]
+    dy = alignment_transform[1]
+    theta = alignment_transform[2]
+
+    stn_transform = tf.stack([
+        tf.cos(theta), -tf.sin(theta), dx,
+        tf.sin(theta), tf.cos(theta), dy])
+    stn_transform = tf.reshape(stn_transform, (2, 3))
+
+    return stn.spatial_transformer_network(unaligned_image_bhwc, stn_transform)
 
 @tf.function
 def alignment_loss(unaligned_image_bhwc, target_image_bhwc, mask_image_bhwc):
