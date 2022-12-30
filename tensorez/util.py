@@ -105,7 +105,7 @@ def crop_image(image, crop, crop_align, crop_offsets = None, crop_center = None)
         return image[..., y : y + height, x : x + width, :]
     return image
 
-def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, crop_center = None, color_balance = True, demosaic = True, frame_index = None):
+def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, crop_center = None, color_balance = True, demosaic = True, frame_index = None, discard_alpha = True):
     #print("Reading", filename, "frame " + str(frame_index) if frame_index is not None else "")
     if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
         image = Image.open(filename)        
@@ -182,6 +182,8 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
         image = tf.io.read_file(filename)
         image = tf.io.decode_image(image)
         image = tf.expand_dims(image, axis = -4)
+        if discard_alpha and image.shape[-1] == 4:
+            image = image[:, :, :, 0:3]
         if to_float:
             image = tf.cast(image, tf.float32) / 255.0
             if srgb_to_linear:

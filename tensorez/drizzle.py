@@ -92,7 +92,7 @@ def get_pixel_value(image_bhwc, xi_coords_bhw, yi_coords_bhw):
     return tf.gather_nd(image_bhwc, indices)
 
 
-def affine_grid_generator(height, width, theta):
+def affine_grid_generator(out_h, out_w, theta):
     """
     This function returns a sampling grid, which when
     used with the bilinear sampler on the input feature
@@ -101,10 +101,10 @@ def affine_grid_generator(height, width, theta):
 
     Input
     -----
-    - height: desired height of grid/output. Used
+    - out_h: desired height of grid/output. Used
       to downsample or upsample.
 
-    - width: desired width of grid/output. Used
+    - out_w: desired width of grid/output. Used
       to downsample or upsample.
 
     - theta: affine transform matrices of shape (num_batch, 2, 3).
@@ -126,8 +126,15 @@ def affine_grid_generator(height, width, theta):
     num_batch = tf.shape(theta)[0]
 
     # create normalized 2D grid
-    x = tf.linspace(-1.0, 1.0, width)
-    y = tf.linspace(-1.0, 1.0, height)
+
+    # coordinate in upper-left of the pixel:
+    #x = (tf.range(0, out_w, dtype = tf.float32) * 2.0 / out_w) - 1.0
+    #y = (tf.range(0, out_h, dtype = tf.float32) * 2.0 / out_h) - 1.0
+
+    # coordinate in center of pixel:
+    x = ((tf.range(0, out_w, dtype = tf.float32) + 0.5) * 2.0 / tf.cast(out_w, tf.float32)) - 1.0
+    y = ((tf.range(0, out_h, dtype = tf.float32) + 0.5) * 2.0 / tf.cast(out_h, tf.float32)) - 1.0
+    
     x_t, y_t = tf.meshgrid(x, y)
 
     # flatten
@@ -151,7 +158,7 @@ def affine_grid_generator(height, width, theta):
     # batch grid has shape (num_batch, 2, H*W)
 
     # reshape to (num_batch, H, W, 2)
-    batch_grids = tf.reshape(batch_grids, [num_batch, 2, height, width])
+    batch_grids = tf.reshape(batch_grids, [num_batch, 2, out_h, out_w])
 
     return batch_grids
 
@@ -298,8 +305,8 @@ def drizzle_sampler(input_bhwc, grid_bihw, jacobian_biohw, pixfrac, supersample)
     zero = tf.zeros([], dtype='int32')
 
     # convention is that the coordinate is the upper-left of the pixel
-    xi_pixel_coords_bhw = 0.5 * ((xi_coords_bhw + 1.0) * tf.cast(max_yi, 'float32'))
-    yi_pixel_coords_bhw = 0.5 * ((yi_coords_bhw + 1.0) * tf.cast(max_xi, 'float32'))
+    xi_pixel_coords_bhw = 0.5 * ((xi_coords_bhw + 1.0) * tf.cast(ih, 'float32'))
+    yi_pixel_coords_bhw = 0.5 * ((yi_coords_bhw + 1.0) * tf.cast(iw, 'float32'))
 
     xi_floor_coords_bhw = tf.floor(xi_pixel_coords_bhw)
     yi_floor_coords_bhw = tf.floor(yi_pixel_coords_bhw)
