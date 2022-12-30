@@ -46,16 +46,16 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
     # that'll be helpful if we have per-pixel shifts (geometric distortion, local alignment, that sort of thing)
     # but it's actually completely pointless for affine transforms, since the valaues will actually be the same for each pixel.
     # so, in that case, we could save some memory and time by just giving a single value that can be broadcasted as needed.
-    jacobian_biohw = jacobian_from_grid(grid_bihw)
+    #jacobian_biohw = jacobian_from_grid(grid_bihw)
 
     if inputspace_weights_bhwc is None:
         inputspace_weights_bhwc = tf.ones_like(input_image_bhwc)
     else:
         input_image_bhwc *= inputspace_weights_bhwc
     
-    output_image_bhwc = drizzle_sampler(input_image_bhwc, grid_bihw, jacobian_biohw, pixfrac, supersample)
+    output_image_bhwc = drizzle_sampler(input_image_bhwc, grid_bihw, pixfrac)
 
-    output_weights_bhwc = drizzle_sampler(inputspace_weights_bhwc, grid_bihw, jacobian_biohw, pixfrac, supersample)
+    output_weights_bhwc = drizzle_sampler(inputspace_weights_bhwc, grid_bihw, pixfrac)
 
     if outputspace_weights_bhwc is not None:
         output_weights_bhwc *= outputspace_weights_bhwc
@@ -127,11 +127,8 @@ def affine_grid_generator(out_h, out_w, theta):
 
     # create normalized 2D grid
 
-    # coordinate in upper-left of the pixel:
-    #x = (tf.range(0, out_w, dtype = tf.float32) * 2.0 / out_w) - 1.0
-    #y = (tf.range(0, out_h, dtype = tf.float32) * 2.0 / out_h) - 1.0
-
-    # coordinate in center of pixel:
+    # x[x_o] means, for output pixels in column x_o, what x coordinate (normalized -1 to 1) from the input image should we sample?
+    # we choose our sample points at the center of the output pixels.  (This doesn't match what STN did.)
     x = ((tf.range(0, out_w, dtype = tf.float32) + 0.5) * 2.0 / tf.cast(out_w, tf.float32)) - 1.0
     y = ((tf.range(0, out_h, dtype = tf.float32) + 0.5) * 2.0 / tf.cast(out_h, tf.float32)) - 1.0
     
@@ -157,6 +154,7 @@ def affine_grid_generator(out_h, out_w, theta):
     batch_grids = tf.matmul(theta, sampling_grid)
     # batch grid has shape (num_batch, 2, H*W)
 
+    # this comment is a lie:
     # reshape to (num_batch, H, W, 2)
     batch_grids = tf.reshape(batch_grids, [num_batch, 2, out_h, out_w])
 
@@ -203,142 +201,43 @@ def jacobian_from_grid(grid_bihw):
 
     return jacobian_biohw
 
-
-def bilinear_sampler(img, x, y):
-    """
-    Performs bilinear sampling of the input images according to the
-    normalized coordinates provided by the sampling grid. Note that
-    the sampling is done identically for each channel of the input.
-
-    To test if the function works properly, output image should be
-    identical to input image when theta is initialized to identity
-    transform.
-
-    Input
-    -----
-    - img: batch of images in (B, H, W, C) layout.
-    - grid: x, y which is the output of affine_grid_generator.
-
-    Returns
-    -------
-    - out: interpolated images according to grids. Same size as grid.
-    """
-    H = tf.shape(img)[1]
-    W = tf.shape(img)[2]
-    max_y = tf.cast(H - 1, 'int32')
-    max_x = tf.cast(W - 1, 'int32')
-    zero = tf.zeros([], dtype='int32')
-
-    # rescale x and y to [0, W-1/H-1]
-    x = tf.cast(x, 'float32')
-    y = tf.cast(y, 'float32')
-
-    # hax todo find right way to modify this
-    # was:
-    #x = 0.5 * ((x + 1.0) * tf.cast(max_x-1, 'float32'))
-    #y = 0.5 * ((y + 1.0) * tf.cast(max_y-1, 'float32'))
-    # but should be:
-    x = 0.5 * ((x + 1.0) * tf.cast(max_x, 'float32'))
-    y = 0.5 * ((y + 1.0) * tf.cast(max_y, 'float32'))
-
-    # grab 4 nearest corner points for each (x_i, y_i)
-    x0 = tf.cast(tf.floor(x), 'int32')
-    x1 = x0 + 1
-    y0 = tf.cast(tf.floor(y), 'int32')
-    y1 = y0 + 1
-
-    # hax - also changing it so we only clip the indices, but not the coordinates
-    # used in the delta calcuation below.  This seems to have the effect of changing the borders
-    # from being black (and cutting off the lower-right edge with the identity transform)
-    # to being clamp to nearest
-
-    # clip to range [0, H-1/W-1] to not violate img boundaries
-    x0_clipped = tf.clip_by_value(x0, zero, max_x)
-    x1_clipped = tf.clip_by_value(x1, zero, max_x)
-    y0_clipped = tf.clip_by_value(y0, zero, max_y)
-    y1_clipped = tf.clip_by_value(y1, zero, max_y)
-
-    # get pixel value at corner coords
-    Ia = get_pixel_value(img, x0_clipped, y0_clipped)
-    Ib = get_pixel_value(img, x0_clipped, y1_clipped)
-    Ic = get_pixel_value(img, x1_clipped, y0_clipped)
-    Id = get_pixel_value(img, x1_clipped, y1_clipped)
-
-    # recast as float for delta calculation
-    x0 = tf.cast(x0, 'float32')
-    x1 = tf.cast(x1, 'float32')
-    y0 = tf.cast(y0, 'float32')
-    y1 = tf.cast(y1, 'float32')
-
-    # calculate deltas
-    wa = (x1-x) * (y1-y)
-    wb = (x1-x) * (y-y0)
-    wc = (x-x0) * (y1-y)
-    wd = (x-x0) * (y-y0)
-
-    # add dimension for addition
-    wa = tf.expand_dims(wa, axis=3)
-    wb = tf.expand_dims(wb, axis=3)
-    wc = tf.expand_dims(wc, axis=3)
-    wd = tf.expand_dims(wd, axis=3)
-
-    # compute output
-    out = tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])
-
-    return out
-
-
-def drizzle_sampler(input_bhwc, grid_bihw, jacobian_biohw, pixfrac, supersample):
-    xi_coords_bhw = grid_bihw[:, 0, :, :]
-    yi_coords_bhw = grid_bihw[:, 1, :, :]
-
-    # todo: supersample, needs this - huh, i guess the other way doesn't?
-    dxi_over_dxo_bhw = jacobian_biohw[:, 0, 0, :, :]
-    dxi_over_dyo_bhw = jacobian_biohw[:, 0, 1, :, :]
-    dyi_over_dxo_bhw = jacobian_biohw[:, 1, 0, :, :]
-    dyi_over_dyo_bhw = jacobian_biohw[:, 1, 1, :, :]
+def drizzle_sampler(input_bhwc, normalized_coords_bihw, pixfrac):
 
     ih = tf.shape(input_bhwc)[1]
     iw = tf.shape(input_bhwc)[2]
-    max_yi = tf.cast(ih - 1, 'int32')
-    max_xi = tf.cast(iw - 1, 'int32')
-    zero = tf.zeros([], dtype='int32')
+    size_bihw = tf.reshape(tf.stack([iw, ih]), (1, 2, 1, 1))
+    max_bihw = size_bihw - 1
 
     # convention is that the coordinate is the upper-left of the pixel
-    xi_pixel_coords_bhw = 0.5 * ((xi_coords_bhw + 1.0) * tf.cast(ih, 'float32'))
-    yi_pixel_coords_bhw = 0.5 * ((yi_coords_bhw + 1.0) * tf.cast(iw, 'float32'))
+    pixel_coords_bihw = 0.5 * ((normalized_coords_bihw + 1.0) * tf.cast(size_bihw, 'float32'))
 
-    xi_floor_coords_bhw = tf.floor(xi_pixel_coords_bhw)
-    yi_floor_coords_bhw = tf.floor(yi_pixel_coords_bhw)
+    floor_coords_bihw = tf.floor(pixel_coords_bihw)
 
-    xi_int_coords_bhw = tf.cast(xi_floor_coords_bhw, 'int32')
-    yi_int_coords_bhw = tf.cast(yi_floor_coords_bhw, 'int32')
+    int_coords_bihw = tf.cast(floor_coords_bihw, 'int32')
 
-    # these we can use to do the lookup    
-    xi_clipped_int_coords_bhw = tf.clip_by_value(xi_int_coords_bhw, zero, max_xi)
-    yi_clipped_int_coords_bhw = tf.clip_by_value(yi_int_coords_bhw, zero, max_yi)
+    # these we can use to do the lookup
+    zero = tf.zeros([], dtype='int32')    
+    clipped_int_coords_bihw = tf.clip_by_value(int_coords_bihw, zero, max_bihw)
 
-    xi_within_input_bhw = tf.logical_and(tf.greater_equal(xi_int_coords_bhw, zero), tf.greater_equal(max_xi, xi_int_coords_bhw))
-    yi_within_input_bhw = tf.logical_and(tf.greater_equal(yi_int_coords_bhw, zero), tf.greater_equal(max_yi, yi_int_coords_bhw))
-    within_input_bhw = tf.logical_and(xi_within_input_bhw, yi_within_input_bhw)
+    within_input_bihw = tf.cast(tf.logical_and(tf.greater_equal(int_coords_bihw, zero), tf.greater_equal(max_bihw, int_coords_bihw)), dtype = tf.float32)
+
+    within_input_bhw = tf.reduce_prod(within_input_bihw, axis=1)
 
     # coordinates within the pixel..
-    xi_subpixel_coords_bhw = xi_pixel_coords_bhw - xi_floor_coords_bhw
-    yi_subpixel_coords_bhw = yi_pixel_coords_bhw - yi_floor_coords_bhw
+    subpixel_coords_bihw = pixel_coords_bihw - floor_coords_bihw
 
-    xi_dist_from_center_bhw = tf.abs(xi_subpixel_coords_bhw - 0.5)
-    yi_dist_from_center_bhw = tf.abs(yi_subpixel_coords_bhw - 0.5)
+    dist_from_center_bihw = tf.abs(subpixel_coords_bihw - 0.5)
 
-    xi_within_pixfrac_bhw = tf.greater(pixfrac * 0.5, xi_dist_from_center_bhw)
-    yi_within_pixfrac_bhw = tf.greater(pixfrac * 0.5, yi_dist_from_center_bhw)
-    within_pixfrac_bhw = tf.logical_and(xi_within_pixfrac_bhw, yi_within_pixfrac_bhw)
+    within_pixfrac_bihw = tf.cast(tf.greater(pixfrac * 0.5, dist_from_center_bihw), dtype = tf.float32)
 
-    weight_bhw = tf.cast(tf.logical_and(within_input_bhw, within_pixfrac_bhw), dtype = input_bhwc.dtype)
+    within_pixfrac_bhw = tf.reduce_prod(within_pixfrac_bihw, axis=1)
+
+    weight_bhw = within_input_bhw * within_pixfrac_bhw
     
     # same weights for all channels... hmm... makes me think of cool debayering stuff that could be done...
     weight_bhwc = tf.expand_dims(weight_bhw, axis = 3)
     
-    pixel_values_bhwc = get_pixel_value(input_bhwc, xi_clipped_int_coords_bhw, yi_clipped_int_coords_bhw)
+    pixel_values_bhwc = get_pixel_value(input_bhwc, clipped_int_coords_bihw[:, 0, :, :], clipped_int_coords_bihw[:, 1, :, :])
 
     output_bhwc = pixel_values_bhwc * weight_bhwc
 
