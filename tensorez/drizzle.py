@@ -1,29 +1,85 @@
-'''
-drizzle.py - a python / Tensorflow implementation of the DRIZZLE algorithm
+"""
+drizzle.py - a Python / Tensorflow implementation of the Drizzle algorithm
 by Tom Felker
-code based on and inspired by this implementation of Spatial Transformer Network (MIT license, by Kevin Zakka)
+code based on and inspired by Kevin Zakka's implementation of Spatial Transformer Network (MIT license)
     - https://github.com/kevinzakka/spatial-transformer-network 
     - itself based on 'Spatial Transformer Networks', Jaderberg et. al,
         - https://arxiv.org/abs/1506.02025
-and with reference to the DRIZZLE paper by Fruchter, A. S.; Hook, R. N.:
+and with reference to the Drizzle paper by Fruchter, A. S.; Hook, R. N.:
     - https://arxiv.org/pdf/astro-ph/9808087.pdf
     - DOI 10.1086/338393
-'''
+
+My convention is for the names of tensors to end with the interpretations of their indices, in abbreviated form.
+Those abbreviations mean:
+    b: batch (for handling multiple images at once)
+    h: height (0 <= y < height)
+    w: width (0 <= x < width)
+    c: channel (rgb)
+    i: coordinate in input image (0 is x_i, 1 is y_i)
+    o: coordinate in output image (0 is x_o, 1 is y_o)
+    s: sample (for doing supersampling)
+
+"""
 
 import tensorflow as tf
 
-'''
-A lot of one-letter variable names will mean something like:
-    b: batch
-    h: height
-    w: width
-    c: channel
-    i: coordinate in input image
-    o: coordinate in output image
-'''
-
 @tf.function
-def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=None, inputspace_weights_bhwc = None, outputspace_weights_bhwc = None, supersample = 4):
+def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=None, inputspace_weights_bhwc = None, supersample = 4, jitter = True):
+    """ Uses the Drizzle algorithm to transform and upscale images.
+    
+    Args:
+        input_image_bhwc:
+            The images to drizzle.
+
+        theta:
+            A 2d affine transform matrix for each image, which will be reshaped to [b, 2, 3].
+
+            This has the same convention as Spatial Transformer Network.
+            If output_coord is a column vector (in homogenous coordinates, so with a 1 at the bottom), then
+
+            input_coord = theta * output_coord
+
+            Both coordinates are normalized so that the image covers [-1, 1], so rotations will be about the center.
+
+        upscale:
+            How much bigger the output should be from the input.  (Don't simultaneously give out_shape_hw.)
+
+            This is 's' in the DRIZZLE paper.
+
+            Note that we're currently not scaling the image by s^2 as the paper does.  Doing so makes sense
+                when using units of irradiance (power per area), but not for radiance (power per area per solid angle), which is the normal convention in computer graphics.
+                Arguably we should scale the values (by the determinant of the jacobian) if theta doesn't preserve area, but we're not doing that yet.
+
+        pixfrac:
+            The ratio of the linear size of the drop to the input pixel.  Should be between 0 and 1.
+
+            0 would be the equivalent of 'interlacing' (but don't go too close to zero, or you would need a lot of supersampling to avoid missing pixels)
+            1 would be the equivalent of 'shift-and-add' (which seems to be what astronomy people call bilinear sampling)
+          
+        out_shape_hw:
+            The height and width you'd like the output to be.  (if you're using this, pass upscale=None, and we will infer it.)
+
+        inputspace_weights_bhwc:
+            Weights to multply in, per input pixel.  (h and w refer to the input image dimensions.)
+
+            This is where, for example, you could pass 0 for dead pixels or cosmic ray hits.
+
+        supersample:
+            How many samples to take in each direction per pixel.  (e.g., supersample=4 samples in a 4x4 grid, so 16 samples.)  Pass 1 to disable, don't pass 0.
+
+            We aren't computing the overlaps analytically, because with distortion or weird transforms, there's no limit to how many input pixels could touch an output pixel.
+            Instead, we take a grid of samples in the output pixel, and for each sample, determine whether it's within the 'drip', i.e. near the center, of the input pixel.
+
+        jitter:
+            If True, jitter the positions of the samples within the pixel.  This should help prevent aliasing / moire patterns from affecting the weights.
+
+    Returns:
+        A tuple (output_image_bhwc, output_weights_bhwc), where:
+
+            output_image_bhwc is the resulting images.  Places where the input pixels fell have the corresponding values, other places have 0.
+        
+            output_weights_bhwc is the resulting weights.  Places where the input pixels fell have 1 (times any weights given), other places have 0.
+    """
 
     b = tf.shape(input_image_bhwc)[0]
     in_h = tf.shape(input_image_bhwc)[1]
@@ -42,7 +98,7 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
 
     grid_bihw = affine_grid_generator(out_h, out_w, theta)
 
-    if supersample != 1:
+    if supersample != 1 or jitter is True:
         # TODO: This is doing it numerically, and computing the jacobian at every pixel.
         # that'll be helpful if we have per-pixel shifts (geometric distortion, local alignment, that sort of thing)
         # but it's actually completely pointless for affine transforms, since the valaues will actually be the same for each pixel.
@@ -52,22 +108,12 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
         # not needed when we're not supersampling.
         jacobian_biohw = None
 
-    if inputspace_weights_bhwc is None:
-        inputspace_weights_bhwc = tf.ones_like(input_image_bhwc)
-    else:
-        input_image_bhwc *= inputspace_weights_bhwc
-    
-    output_image_bhwc = drizzle_sampler(input_image_bhwc, grid_bihw, pixfrac, supersample, jacobian_biohw)
-
-    output_weights_bhwc = drizzle_sampler(inputspace_weights_bhwc, grid_bihw, pixfrac, supersample, jacobian_biohw)
-
-    if outputspace_weights_bhwc is not None:
-        output_weights_bhwc *= outputspace_weights_bhwc
+    output_image_bhwc, output_weights_bhwc = drizzle_sampler(input_image_bhwc, inputspace_weights_bhwc, grid_bihw, pixfrac, supersample, jitter, jacobian_biohw)
 
     return output_image_bhwc, output_weights_bhwc
 
 
-def get_pixel_value(image_bhwc, xi_coords_bhw, yi_coords_bhw):
+def get_pixel_value(image_bhwc, xi_coords_bhws, yi_coords_bhws):
     """
     Utility function to get pixel value for coordinate
     vectors x and y from a  4D tensor image.
@@ -82,18 +128,23 @@ def get_pixel_value(image_bhwc, xi_coords_bhw, yi_coords_bhw):
     -------
     - output: tensor of shape (B, H, W, C)
     """
-    shape = tf.shape(xi_coords_bhw)
+    shape = tf.shape(xi_coords_bhws)
     batch_size = shape[0]
     height = shape[1]
     width = shape[2]
+    samples = shape[3]
 
     batch_idx = tf.range(0, batch_size)
-    batch_idx = tf.reshape(batch_idx, (batch_size, 1, 1))
-    b = tf.tile(batch_idx, (1, height, width))
+    batch_idx = tf.reshape(batch_idx, (batch_size, 1, 1, 1))
+    b = tf.tile(batch_idx, (1, height, width, samples))
 
-    indices = tf.stack([b, yi_coords_bhw, xi_coords_bhw], 3)
+    indices = tf.stack([b, yi_coords_bhws, xi_coords_bhws], axis = -1)
 
-    return tf.gather_nd(image_bhwc, indices)
+    output_bhwsc = tf.gather_nd(image_bhwc, indices)
+
+    output_bhwc = tf.reduce_mean(output_bhwsc, axis = -2)
+
+    return output_bhwc
 
 
 def affine_grid_generator(out_h, out_w, theta):
@@ -205,8 +256,9 @@ def jacobian_from_grid(grid_bihw):
 
     return jacobian_biohw
 
-def drizzle_sampler(input_bhwc, normalized_coords_bihw, pixfrac, supersample, jacobian_biohw):
-    if supersample == 1:
+def drizzle_sampler(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihw, pixfrac, supersample, jitter, jacobian_biohw):
+    if supersample == 1 and jitter is False:
+        normalized_coords_bihws = tf.expand_dims(normalized_coords_bihw, axis = -1)
         return drizzle_sample_centers(input_bhwc, normalized_coords_bihw, pixfrac)
 
     b = normalized_coords_bihw.shape[0]
@@ -215,78 +267,85 @@ def drizzle_sampler(input_bhwc, normalized_coords_bihw, pixfrac, supersample, ja
     c = input_bhwc.shape[-1]
 
     # how much we perturb our output normalized coords
-    ssx = ((tf.range(0, supersample, dtype = tf.float32) + 0.5) / supersample - .5) / ow
-    ssy = ((tf.range(0, supersample, dtype = tf.float32) + 0.5) / supersample - .5) / oh
-
     # s and t are the x,y coordinates within the supersample grid
+    ssx_s = tf.range(0, supersample, dtype = tf.float32)
+    ssy_t = tf.range(0, supersample, dtype = tf.float32)
 
-    output_perturbation_sto = tf.stack(tf.meshgrid(ssx, ssy), axis = -1)
+    output_perturbation_samples_sto = tf.stack(tf.meshgrid(ssx_s, ssy_t), axis = -1)
+
+    # nobody else cares that our samples are in a grid (and for fancier sampling, they wouldn't be), so collapse that to one dimension,
+    # and add extra dimensions that we'll need if jittering.  (When not, they'll broadcast.)
+    output_perturbation_samples_bhwso = tf.reshape(output_perturbation_samples_sto, shape=(1, 1, 1, supersample * supersample, 2))
+
+    if jitter:
+        # un-broadcast since we need a jitter value for every pixel in every image
+        output_perturbation_samples_bhwso = tf.tile(output_perturbation_samples_bhwso, multiples = (b, oh, ow, 1, 1))
+        output_perturbation_samples_bhwso += tf.random.uniform(shape = output_perturbation_samples_bhwso.shape) - 0.5
+
+    # convert from "samples" to "normalized output coordinates"
+    output_size_bhwso = tf.cast(tf.reshape(tf.stack([ow, oh]), shape = (1, 1, 1, 1, 2)), dtype = tf.float32)
+    output_perturbation_bhwso = ((output_perturbation_samples_bhwso + 0.5) / supersample - 0.5) / output_size_bhwso
     
-    #tf.print(output_perturbation_sto)
-
-    # what i kinda want is:
-    # for s in range(0, supersample)
-    #   for t in range(0, supersample)
-    #       for o in (0, 1)
-    #           normalized_coords_bihwst[:,:,:,:,s,t] = normalized_coords_bihw + tf.squeeze(jacobian_biohw[:,:,o,:,:]) * output_perturbation_st[s, t]
-
     normalized_coords_bihws = tf.expand_dims(normalized_coords_bihw, axis = -1)
-    normalized_coords_bihwst = tf.expand_dims(normalized_coords_bihws, axis = -1)
 
-    input_perturbations_bihwst = tf.einsum('biohw,sto->bihwst', jacobian_biohw, output_perturbation_sto)
-    perturbed_normalized_coords_bihwst = normalized_coords_bihwst + input_perturbations_bihwst
+    # This is summing over o (the index of the output coordinate).  In other words, at each sample, we're perturbing the output coordinate
+    # by given amounts along the output-x and output-y directions, and for each of those directions, we must multiply by the the jacobian
+    # to figure out how much to perturb the input x and y coordinates.
+    input_perturbations_bihws = tf.einsum('biohw,bhwso->bihws', jacobian_biohw, output_perturbation_bhwso)
 
-    # so then, i'd just want to sum over st
-    # but the idea would be to keep that going all the way to the gather_nd() inside get_pixel_value(), so that the gatherings would be localized, for cache coherence
-    # however, the lame way would be
+    perturbed_normalized_coords_bihws = normalized_coords_bihws + input_perturbations_bihws
 
-    output_bhwc = tf.zeros(shape = (b, oh, ow, c), dtype = tf.float32)
-    for s in tf.range(0, supersample):
-        for t in tf.range(0, supersample):
-            perturbed_normalized_coords_bihw = perturbed_normalized_coords_bihwst[:, :, :, :, s, t]
-            output_bhwc += drizzle_sample_centers(input_bhwc, perturbed_normalized_coords_bihw, pixfrac)
-    output_bhwc /= tf.cast(tf.square(supersample), dtype=output_bhwc.dtype)
-    return output_bhwc
+    return drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, perturbed_normalized_coords_bihws, pixfrac)
     
 
-def drizzle_sample_centers(input_bhwc, normalized_coords_bihw, pixfrac):
+def drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihws, pixfrac):
 
     ih = tf.shape(input_bhwc)[1]
     iw = tf.shape(input_bhwc)[2]
-    size_bihw = tf.reshape(tf.stack([iw, ih]), (1, 2, 1, 1))
-    max_bihw = size_bihw - 1
+    size_bihws = tf.reshape(tf.stack([iw, ih]), (1, 2, 1, 1, 1))
+    max_bihws = size_bihws - 1
 
     # convention is that the coordinate is the upper-left of the pixel
-    pixel_coords_bihw = 0.5 * ((normalized_coords_bihw + 1.0) * tf.cast(size_bihw, 'float32'))
+    pixel_coords_bihws = 0.5 * ((normalized_coords_bihws + 1.0) * tf.cast(size_bihws, 'float32'))
 
-    floor_coords_bihw = tf.floor(pixel_coords_bihw)
+    floor_coords_bihws = tf.floor(pixel_coords_bihws)
 
-    int_coords_bihw = tf.cast(floor_coords_bihw, 'int32')
+    int_coords_bihws = tf.cast(floor_coords_bihws, 'int32')
 
     # these we can use to do the lookup
     zero = tf.zeros([], dtype='int32')    
-    clipped_int_coords_bihw = tf.clip_by_value(int_coords_bihw, zero, max_bihw)
+    clipped_int_coords_bihws = tf.clip_by_value(int_coords_bihws, zero, max_bihws)
 
-    within_input_bihw = tf.cast(tf.logical_and(tf.greater_equal(int_coords_bihw, zero), tf.greater_equal(max_bihw, int_coords_bihw)), dtype = tf.float32)
+    within_input_bihws = tf.cast(tf.logical_and(tf.greater_equal(int_coords_bihws, zero), tf.greater_equal(max_bihws, int_coords_bihws)), dtype = tf.float32)
 
-    within_input_bhw = tf.reduce_prod(within_input_bihw, axis=1)
+    within_input_bhws = tf.reduce_prod(within_input_bihws, axis=1)
 
     # coordinates within the pixel..
-    subpixel_coords_bihw = pixel_coords_bihw - floor_coords_bihw
+    subpixel_coords_bihws = pixel_coords_bihws - floor_coords_bihws
 
-    dist_from_center_bihw = tf.abs(subpixel_coords_bihw - 0.5)
+    dist_from_center_bihws = tf.abs(subpixel_coords_bihws - 0.5)
 
-    within_pixfrac_bihw = tf.cast(tf.greater(pixfrac * 0.5, dist_from_center_bihw), dtype = tf.float32)
+    within_pixfrac_bihws = tf.cast(tf.greater(pixfrac * 0.5, dist_from_center_bihws), dtype = tf.float32)
 
-    within_pixfrac_bhw = tf.reduce_prod(within_pixfrac_bihw, axis=1)
+    within_pixfrac_bhws = tf.reduce_prod(within_pixfrac_bihws, axis=1)
 
-    weight_bhw = within_input_bhw * within_pixfrac_bhw
+    # geometric meaning 'the weight we get because of the geometry of how the drips map to the output pixels'
+    geometric_weight_bhws = within_input_bhws * within_pixfrac_bhws
+
+    # get_pixel_value() will reduce_mean along the s axis, we must do the same for weights.
+    geometric_weight_bhw = tf.reduce_mean(geometric_weight_bhws, axis = -1)
     
     # same weights for all channels... hmm... makes me think of cool debayering stuff that could be done...
-    weight_bhwc = tf.expand_dims(weight_bhw, axis = 3)
+    geometric_weight_bhwc = tf.expand_dims(geometric_weight_bhw, axis = 3)
     
-    pixel_values_bhwc = get_pixel_value(input_bhwc, clipped_int_coords_bihw[:, 0, :, :], clipped_int_coords_bihw[:, 1, :, :])
+    pixel_values_bhwc = get_pixel_value(input_bhwc, clipped_int_coords_bihws[:, 0, :, :, :], clipped_int_coords_bihws[:, 1, :, :, :])    
 
-    output_bhwc = pixel_values_bhwc * weight_bhwc
+    # it's necessary to push the weights lookup all the way down here, rather than a seperate pass, so we use the same jitter values.
+    output_weight_bhwc = geometric_weight_bhwc
+    if inputspace_weights_bhwc is not None:
+        inputspace_weight_values_bhwc = get_pixel_value(inputspace_weights_bhwc, clipped_int_coords_bihws[:, 0, :, :, :], clipped_int_coords_bihws[:, 1, :, :, :])
+        output_weight_bhwc *= inputspace_weight_values_bhwc
 
-    return output_bhwc
+    output_value_bhwc = pixel_values_bhwc * output_weight_bhwc
+
+    return output_value_bhwc, output_weight_bhwc
