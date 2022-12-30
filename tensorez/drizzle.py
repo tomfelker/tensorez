@@ -42,20 +42,24 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
 
     grid_bihw = affine_grid_generator(out_h, out_w, theta)
 
-    # TODO: This is doing it numerically, and computing the jacobian at every pixel.
-    # that'll be helpful if we have per-pixel shifts (geometric distortion, local alignment, that sort of thing)
-    # but it's actually completely pointless for affine transforms, since the valaues will actually be the same for each pixel.
-    # so, in that case, we could save some memory and time by just giving a single value that can be broadcasted as needed.
-    #jacobian_biohw = jacobian_from_grid(grid_bihw)
+    if supersample != 1:
+        # TODO: This is doing it numerically, and computing the jacobian at every pixel.
+        # that'll be helpful if we have per-pixel shifts (geometric distortion, local alignment, that sort of thing)
+        # but it's actually completely pointless for affine transforms, since the valaues will actually be the same for each pixel.
+        # so, in that case, we could save some memory and time by just giving a single value that can be broadcasted as needed.
+        jacobian_biohw = jacobian_from_grid(grid_bihw)
+    else:
+        # not needed when we're not supersampling.
+        jacobian_biohw = None
 
     if inputspace_weights_bhwc is None:
         inputspace_weights_bhwc = tf.ones_like(input_image_bhwc)
     else:
         input_image_bhwc *= inputspace_weights_bhwc
     
-    output_image_bhwc = drizzle_sampler(input_image_bhwc, grid_bihw, pixfrac)
+    output_image_bhwc = drizzle_sampler(input_image_bhwc, grid_bihw, pixfrac, supersample, jacobian_biohw)
 
-    output_weights_bhwc = drizzle_sampler(inputspace_weights_bhwc, grid_bihw, pixfrac)
+    output_weights_bhwc = drizzle_sampler(inputspace_weights_bhwc, grid_bihw, pixfrac, supersample, jacobian_biohw)
 
     if outputspace_weights_bhwc is not None:
         output_weights_bhwc *= outputspace_weights_bhwc
@@ -175,33 +179,77 @@ def jacobian_from_grid(grid_bihw):
     padded_valid_bihw = tf.pad(valid_bihw, paddings = ((0, 0), (0, 0), (1, 1), (1, 1)), mode = 'CONSTANT', constant_values = 0)
 
     # these are copies of grid, shifted in each direction.  Read oxm1 as "output x minus 1"
-    padded_grid_oxm1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = 0)
-    padded_grid_oxp1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = 0)
-    padded_grid_oym1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = 1)
-    padded_grid_oyp1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = 1)
+    padded_grid_oxm1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = -1)
+    padded_grid_oxp1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = -1)
+    padded_grid_oym1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = -2)
+    padded_grid_oyp1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = -2)
 
     # these are copies of valid, shifted in each direction.  Read oxm1 as "output x minus 1"
-    padded_valid_oxm1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = 0)
-    padded_valid_oxp1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = 0)
-    padded_valid_oym1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = 1)
-    padded_valid_oyp1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = 1)
+    padded_valid_oxm1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = -1)
+    padded_valid_oxp1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = -1)
+    padded_valid_oym1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = -2)
+    padded_valid_oyp1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = -2)
 
     # the denominators account for how many valid coordinates we had (which should be 1 or 2)
 
     # read as "change in input coordinate i per change in output x coordinate"
-    di_over_dxo_bihw = (padded_grid_oxp1_bihw - padded_grid_oxm1_bihw) / ((padded_valid_oxp1_bihw + padded_valid_oxm1_bihw) * out_w)
+    di_over_dxo_bihw = (padded_grid_oxp1_bihw - padded_grid_oxm1_bihw) / ((padded_valid_oxp1_bihw + padded_valid_oxm1_bihw) / out_w)
     # read as "change in input coordinate i per change in output y coordinate"
-    di_over_dyo_bihw = (padded_grid_oyp1_bihw - padded_grid_oym1_bihw) / ((padded_valid_oyp1_bihw + padded_valid_oym1_bihw) * out_h)
+    di_over_dyo_bihw = (padded_grid_oyp1_bihw - padded_grid_oym1_bihw) / ((padded_valid_oyp1_bihw + padded_valid_oym1_bihw) / out_h)
     
     # could also have named this di_over_do_biohw, which you could read as "change in input coordinate i per change in output coordinate o"
     padded_jacobian_biohw = tf.stack([di_over_dxo_bihw, di_over_dyo_bihw], axis = 2)
 
     # unpad
-    jacobian_biohw = padded_jacobian_biohw[:, :, :, 1 : out_h, 1 : out_w]
+    jacobian_biohw = padded_jacobian_biohw[:, :, :, 1 : -1, 1 : -1]
 
     return jacobian_biohw
 
-def drizzle_sampler(input_bhwc, normalized_coords_bihw, pixfrac):
+def drizzle_sampler(input_bhwc, normalized_coords_bihw, pixfrac, supersample, jacobian_biohw):
+    if supersample == 1:
+        return drizzle_sample_centers(input_bhwc, normalized_coords_bihw, pixfrac)
+
+    b = normalized_coords_bihw.shape[0]
+    oh = normalized_coords_bihw.shape[2]
+    ow = normalized_coords_bihw.shape[3]
+    c = input_bhwc.shape[-1]
+
+    # how much we perturb our output normalized coords
+    ssx = ((tf.range(0, supersample, dtype = tf.float32) + 0.5) / supersample - .5) / ow
+    ssy = ((tf.range(0, supersample, dtype = tf.float32) + 0.5) / supersample - .5) / oh
+
+    # s and t are the x,y coordinates within the supersample grid
+
+    output_perturbation_sto = tf.stack(tf.meshgrid(ssx, ssy), axis = -1)
+    
+    #tf.print(output_perturbation_sto)
+
+    # what i kinda want is:
+    # for s in range(0, supersample)
+    #   for t in range(0, supersample)
+    #       for o in (0, 1)
+    #           normalized_coords_bihwst[:,:,:,:,s,t] = normalized_coords_bihw + tf.squeeze(jacobian_biohw[:,:,o,:,:]) * output_perturbation_st[s, t]
+
+    normalized_coords_bihws = tf.expand_dims(normalized_coords_bihw, axis = -1)
+    normalized_coords_bihwst = tf.expand_dims(normalized_coords_bihws, axis = -1)
+
+    input_perturbations_bihwst = tf.einsum('biohw,sto->bihwst', jacobian_biohw, output_perturbation_sto)
+    perturbed_normalized_coords_bihwst = normalized_coords_bihwst + input_perturbations_bihwst
+
+    # so then, i'd just want to sum over st
+    # but the idea would be to keep that going all the way to the gather_nd() inside get_pixel_value(), so that the gatherings would be localized, for cache coherence
+    # however, the lame way would be
+
+    output_bhwc = tf.zeros(shape = (b, oh, ow, c), dtype = tf.float32)
+    for s in tf.range(0, supersample):
+        for t in tf.range(0, supersample):
+            perturbed_normalized_coords_bihw = perturbed_normalized_coords_bihwst[:, :, :, :, s, t]
+            output_bhwc += drizzle_sample_centers(input_bhwc, perturbed_normalized_coords_bihw, pixfrac)
+    output_bhwc /= tf.cast(tf.square(supersample), dtype=output_bhwc.dtype)
+    return output_bhwc
+    
+
+def drizzle_sample_centers(input_bhwc, normalized_coords_bihw, pixfrac):
 
     ih = tf.shape(input_bhwc)[1]
     iw = tf.shape(input_bhwc)[2]
