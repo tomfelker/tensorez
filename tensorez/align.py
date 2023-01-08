@@ -61,6 +61,13 @@ def compute_alignment_transforms(
     allow_scale = False,
     allow_skew = False
 ):
+    if not allow_rotation:
+        learning_rate_rotation = 0
+    if not allow_scale:
+        learning_rate_log_scale = 0
+    if not allow_skew:
+        learning_rate_skew = 0
+
     image_shape = lights[0].shape
     image_hw = image_shape.as_list()[-3:-1]
 

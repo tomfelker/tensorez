@@ -56,13 +56,13 @@ debug_frames = 2
 # Data selection
 
 # Moon, directly imaged, near opposition, somewhat dewy lens
-lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step=1, end_frame=30)
-darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER'), frame_step=1, end_frame=30)
-align_by_center_of_mass = False
+#lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step=1, end_frame=30)
+#darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER'), frame_step=1, end_frame=30)
+#align_by_center_of_mass = False
 
 # Mars, directly imaged, near opposition, somewhat dewy lens
-#lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER'), frame_step=1, end_frame=None)
-#darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER'), frame_step=1, end_frame=None)
+lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER'), frame_step=1, end_frame=None)
+darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER'), frame_step=1, end_frame=None)
 #align_by_center_of_mass = True
 #crop = (512, 512)
 

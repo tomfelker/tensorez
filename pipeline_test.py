@@ -11,11 +11,21 @@ from tensorez.align import *
 
 import matplotlib.pyplot as plt
 
+observation = Observation(
+    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step = 1),
+    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER')),
+    align_by_content=True,
+    #compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
+)
+
 #observation = Observation(
-#    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step = 100),
-#    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER')),
+#    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER')),
+#    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER')),
+#    align_by_center_of_mass=True,
+#    crop=(512, 512),
+#    crop_before_content_align=True,
 #    align_by_content=True,
-#    compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
+#    compute_alignment_transforms_kwargs={'allow_rotation': False, 'allow_scale': False, 'allow_skew': False}
 #)
 
 #observation = Observation(
@@ -47,12 +57,12 @@ import matplotlib.pyplot as plt
 #    align_by_center_of_mass=True,
 #)
 
-observation = Observation(
-    lights = ImageSequence(os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')),
-    align_by_center_of_mass=True,
-    align_by_content=True,
-    compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
-)
+#observation = Observation(
+#    lights = ImageSequence(os.path.join('data', 'ISS_aligned_from_The_8_Bit_Zombie', '*.tif')),
+#    align_by_center_of_mass=True,
+#    align_by_content=True,
+#    compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
+#)
 
 
 output_dir = create_timestamped_output_dir('pipeline')
@@ -74,16 +84,28 @@ if debug_alignment and observation.align_by_content:
     plt.close()
 
 
-testing_frame_limit = 500
-if testing_frame_limit is not None:
-    observation = LimitedIterable(observation, testing_frame_limit)
-
+#tf.config.run_functions_eagerly(True)
+observation.debug_frame_limit = 1000
 
 final_image = local_lucky(
     observation,
-    stdevs_above_mean = 3,
-    debug_output_dir=output_dir,
-    noise_wavelength_pixels=5,
-    crossover_wavelength_pixels=45,
+    
+    #algorithm = LuckinessAlgorithmLowpassAbsBandpass,
+    #algorithm_kwargs = {'noise_wavelength_pixels': 15, 'crossover_wavelength_pixels': 45},
+
+    algorithm=LuckinessAlgorithmFrequencyBands,
+    algorithm_kwargs=dict(noise_wavelength_pixels=10, crossover_wavelength_pixels=80, isoplanatic_patch_pixels=100),
+
+    #algorithm = LuckinessAlgorithmImageTimesKnown,
+    #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
+
+    #algorithm = LuckinessAlgorithmImageSquared,
+    #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
+
+    stdevs_above_mean = 7,
+    steepness=5,
+    debug_output_dir=output_dir,    
+    drizzle=False,
+    drizzle_kwargs={'upscale': 4, 'supersample': 4}
 )
 write_image(final_image, os.path.join(output_dir, 'final_image.png'))

@@ -31,6 +31,23 @@ To do good moon or extended object lucky imaging, need local alignment.
             - represents our luckiness
             - 'gentle lowpass' just to get rid of pixel noise (maybe also incorporate dark frame variance here, to unluckify areas around noisy pixels?)
             - big lowpass related to isoplanatic patch
+    - this paper from times immemorial has some ideas for defining 'sharpness': https://apps.dtic.mil/sti/pdfs/AD0786157.pdf "REAL-T1ME CORRECTION OF ATMOSPHERICALLY DEGRADED TELESCOPE IMAGES THROUGH IMAGE SHARPENING" by Richard A. Muller, Andrew Buffington"
+
+        - S_1:  reduce_sum(image*image)
+            - lol wut, this works?  wtf, i guess that kinda makes sense...
+            - idea being that any blurring will spread out the peaks, so will at best preserve reduce_sum(image), but knock down the sum of squares
+            - seems easy to localize, just square the image and then blur it, and rely on the per-pixel normalization of luckiness to handle stuff
+            - would probably need to normalize the images first, so we don't ignore frames with lost intensity for whatever reason
+        - S_2: brightness of brightest pixel... meh
+        - S_3: reduce_sum(image * true_image)
+            - lol, if we knew true_image, why bother? though for stars, you can kinda assume true_image is Dirac delta
+            - but they claim it works even if we're quite wrong about true_image
+            - maybe that means it'll work for true_image = avg of all frames?
+            - sounds like maximizing a dot product, that tracks
+            - again, try blur(image*avg_image)
+        - S_4
+            - wish I knew what they meant here - what's m and n?  (or in appendix, cursive ℓ and m)
+        - S_
 - If I get drizzle working, some interesting questions about how to incorporate it...
     - some part of 'luckiness' should be applied to the raw image (pre drizzle, pre align (not doing that currently)
     - the 'agreement' stuff, ultimately also part of luckiness, in terms of average image (so, post-alignment, output space)

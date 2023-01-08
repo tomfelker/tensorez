@@ -6,7 +6,7 @@ import os.path
 import numpy as np
 
 class Observation:
-    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 1, crop_before_align = False, compute_alignment_transforms_kwargs = {}):
+    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 1, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}):
         self.lights = lights
         self.darks = darks
         self.align_by_center_of_mass = align_by_center_of_mass
@@ -15,9 +15,12 @@ class Observation:
         self.crop = crop
         self.crop_align = crop_align
         self.crop_before_align = crop_before_align
+        self.crop_before_content_align = crop_before_content_align
 
         self.dark_image = None
         self.alignment_transforms = None
+
+        self.debug_frame_limit = None
 
         self.computing_alignment_transforms = False
 
@@ -71,8 +74,10 @@ class Observation:
         if self.darks is not None:
             darks_info = "Darks:\n" + self.darks.get_cache_hash_info()
             hash_info += darks_info.replace('\n', '\n\t') + "\n"
-        if self.crop_before_align:
+        if self.crop_before_align or self.crop_before_content_align:
             hash_info += f"Pre-align crop: {self.crop, self.crop_align}\n"
+            hash_info += f"crop_before_align: {self.crop_before_align}\n"
+            hash_info += f"crop_before_content_align: {self.crop_before_content_align}\n"
         hash_info += f"align_by_center_of_mass: {self.align_by_center_of_mass}\n"
         hash_info += f"compute_alignment_transform({self.compute_alignment_transforms_kwargs})\n"
 
@@ -105,7 +110,7 @@ class Observation:
             txtfile.write(hash_info)
 
 
-    def read_cooked_image(self, index):
+    def read_cooked_image(self, index, skip_content_align = False):
 
         self.load_or_create_dark_image()
         self.load_or_create_alignment_transforms()
@@ -121,10 +126,15 @@ class Observation:
         if self.align_by_center_of_mass:
             image = align_by_center_of_mass(image)
 
-        if self.alignment_transforms is not None:
+        if self.crop_before_content_align and self.crop is not None:
+            image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
+
+        if self.alignment_transforms is not None and not skip_content_align:
             image = align.transform_image(image, self.alignment_transforms[index])
 
-        if not self.crop_before_align and self.crop is not None:
+        # sigh, this is getting ugly...
+        if not self.crop_before_align and not self.crop_before_content_align and self.crop is not None:
+            assert(not skip_content_align)
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
 
         return image
@@ -133,8 +143,11 @@ class Observation:
         return self.read_cooked_image(index)
 
     def __len__(self):
-        return len(self.lights)
+        length = len(self.lights)
+        if self.debug_frame_limit is not None:
+            length = min(length, self.debug_frame_limit)
+        return length
 
     def __iter__(self):
-        for i in range(len(self.lights)):
+        for i in range(len(self)):
             yield self[i]

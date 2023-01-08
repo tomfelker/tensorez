@@ -23,8 +23,7 @@ Those abbreviations mean:
 
 import tensorflow as tf
 
-@tf.function
-def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=None, inputspace_weights_bhwc = None, supersample = 4, jitter = True):
+def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=None, inputspace_weights_bhwc = None, supersample = 4, jitter = True, min_weight = 1/1024):
     """ Uses the Drizzle algorithm to transform and upscale images.
     
     Args:
@@ -73,13 +72,24 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
         jitter:
             If True, jitter the positions of the samples within the pixel.  This should help prevent aliasing / moire patterns from affecting the weights.
 
+        min_weight:
+            for the parts that aren't in the center of the pixel, but are still within the input image, use at minimum this weight, rather than 0
+
     Returns:
         A tuple (output_image_bhwc, output_weights_bhwc), where:
 
-            output_image_bhwc is the resulting images.  Places where the input pixels fell have the corresponding values, other places have 0.
+            output_image_bhwc is the transformed image - basically a nearest-neighbor upsample of the input image, and 0 in places outside the bounds of the input.
+                Depending on your algorithm, you may want to multiply it output_weights_bhwc.
         
-            output_weights_bhwc is the resulting weights.  Places where the input pixels fell have 1 (times any weights given), other places have 0.
+            output_weights_bhwc is the resulting weights - places where the centers of the input pixels fell have 1, other places have 0.
+                (More precisely, centers of pixels have inputspace_weights_bhwc, edges of pixels have min_weight, and places fully outside the input image have 0.)
     """
+
+    # just forwarding to avoid tf.function eating the docstring
+    return drizzle_function(input_image_bhwc, theta, upscale, pixfrac, out_shape_hw, inputspace_weights_bhwc, supersample, jitter, min_weight)
+
+@tf.function
+def drizzle_function(input_image_bhwc, theta, upscale, pixfrac, out_shape_hw, inputspace_weights_bhwc, supersample, jitter, min_weight):
 
     b = tf.shape(input_image_bhwc)[0]
     in_h = tf.shape(input_image_bhwc)[1]
@@ -108,7 +118,7 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
         # not needed when we're not supersampling.
         jacobian_biohw = None
 
-    output_image_bhwc, output_weights_bhwc = drizzle_sampler(input_image_bhwc, inputspace_weights_bhwc, grid_bihw, pixfrac, supersample, jitter, jacobian_biohw)
+    output_image_bhwc, output_weights_bhwc = drizzle_sampler(input_image_bhwc, inputspace_weights_bhwc, grid_bihw, pixfrac, supersample, jitter, jacobian_biohw, min_weight)
 
     return output_image_bhwc, output_weights_bhwc
 
@@ -256,10 +266,10 @@ def jacobian_from_grid(grid_bihw):
 
     return jacobian_biohw
 
-def drizzle_sampler(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihw, pixfrac, supersample, jitter, jacobian_biohw):
+def drizzle_sampler(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihw, pixfrac, supersample, jitter, jacobian_biohw, min_weight):
     if supersample == 1 and jitter is False:
         normalized_coords_bihws = tf.expand_dims(normalized_coords_bihw, axis = -1)
-        return drizzle_sample_centers(input_bhwc, normalized_coords_bihw, pixfrac)
+        return drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihw, pixfrac, min_weight)
 
     b = normalized_coords_bihw.shape[0]
     oh = normalized_coords_bihw.shape[2]
@@ -295,10 +305,10 @@ def drizzle_sampler(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihw,
 
     perturbed_normalized_coords_bihws = normalized_coords_bihws + input_perturbations_bihws
 
-    return drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, perturbed_normalized_coords_bihws, pixfrac)
+    return drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, perturbed_normalized_coords_bihws, pixfrac, min_weight)
     
 
-def drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihws, pixfrac):
+def drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihws, pixfrac, min_weight):
 
     ih = tf.shape(input_bhwc)[1]
     iw = tf.shape(input_bhwc)[2]
@@ -329,6 +339,8 @@ def drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coord
 
     within_pixfrac_bhws = tf.reduce_prod(within_pixfrac_bihws, axis=1)
 
+    within_pixfrac_bhws = tf.maximum(min_weight, within_pixfrac_bhws)
+
     # geometric meaning 'the weight we get because of the geometry of how the drips map to the output pixels'
     geometric_weight_bhws = within_input_bhws * within_pixfrac_bhws
 
@@ -341,11 +353,10 @@ def drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coord
     pixel_values_bhwc = get_pixel_value(input_bhwc, clipped_int_coords_bihws[:, 0, :, :, :], clipped_int_coords_bihws[:, 1, :, :, :])    
 
     # it's necessary to push the weights lookup all the way down here, rather than a seperate pass, so we use the same jitter values.
+
     output_weight_bhwc = geometric_weight_bhwc
     if inputspace_weights_bhwc is not None:
         inputspace_weight_values_bhwc = get_pixel_value(inputspace_weights_bhwc, clipped_int_coords_bihws[:, 0, :, :, :], clipped_int_coords_bihws[:, 1, :, :, :])
         output_weight_bhwc *= inputspace_weight_values_bhwc
 
-    output_value_bhwc = pixel_values_bhwc * output_weight_bhwc
-
-    return output_value_bhwc, output_weight_bhwc
+    return pixel_values_bhwc, output_weight_bhwc
