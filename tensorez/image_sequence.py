@@ -1,7 +1,7 @@
 import glob
 import fnmatch
 import tensorez.ser_format as ser_format
-from tensorez.util import read_image
+from tensorez.util import read_image, read_bayer_filter
 import tensorflow as tf
 
 class ImageSequence:
@@ -78,6 +78,14 @@ class ImageSequence:
         if isinstance(filename, ImageSequence):
             return filename.read_image(frame_index_in_file, **kwargs)
         return read_image(filename, frame_index = frame_index_in_file, **kwargs)
+
+    def read_bayer_filter(self):
+        cooked_index = 0
+        raw_index = self.cooked_to_raw_index(cooked_index)
+        filename, frame_index_in_file = self.raw_index_to_filename_and_frame_index(raw_index)
+        if isinstance(filename, ImageSequence):
+            return filename.read_bayer_filter()
+        return read_bayer_filter(filename)
 
     @staticmethod
     def get_frame_count(filename):

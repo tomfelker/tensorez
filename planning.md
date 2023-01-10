@@ -14,6 +14,9 @@ To do good moon or extended object lucky imaging, need local alignment.
         - i.e., if output[ox,oy] should read input[ix, iy], need to know ∂ix/∂ox, ∂iy/∂ox, ∂ix/∂oy, ∂iy/∂oy
     - in lieu of being clever about pixel intersection area, just do a bunch of supersampling - i.e., do the above at a 4x4 grid over the output pixel instead of just once at the center
         - even lazier but equivalently - just drizzle to a much larger image, like 8x rather than 2x, and then downsample.  wastes memory vs above though.
+    - okay, did this!  only problems:
+        - fairly memory intensive
+        - fairly slow
 
 ## Local lucky
 - I don't trust my local statistics anymore...  it does seem that they'd get a double edge
@@ -52,3 +55,18 @@ To do good moon or extended object lucky imaging, need local alignment.
     - some part of 'luckiness' should be applied to the raw image (pre drizzle, pre align (not doing that currently)
     - the 'agreement' stuff, ultimately also part of luckiness, in terms of average image (so, post-alignment, output space)
     - the final weight / sum stuff needs to be in output space
+
+## Bayer
+- currently, I'm mostly demosasicing manually at the start, and then ignoring it from then on
+- recently added support for Bayer in the local lucky image drizzling process (or non-drizzle)
+- but!  we're using 3x the memory we really need, as demosaicing makes up a lot of numbers that aren't actually there
+- Bayer Subchannels:
+    - my idea is, don't have a 3-channel image at the full sensor resolution (two thirds of whose data is made up),
+    - instead, have a 4-channel image at half the sensor resolution (no made up data).  The channels would correspond to the 4 squares of the bayer pattern.
+        - Pros:
+        - Cons:
+            - need to remember the bayer pattern when finally saving the image out
+            - the channels are each misaligned - no issue when shifting, but it will make rotations and other transformations slightly incorrect
+                - could possibly fix with very fancy math
+            - we throw out some of the benefit of two green channels... if there is a 1-px sharp green edge (oriented +45 degrees), each of the two green
+            channels won't be able to tell that it isn't a less sharp 2px edge.

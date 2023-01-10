@@ -6,6 +6,7 @@ tf.compat.v1.enable_eager_execution()
 
 # image has shape (batch, height, width, channels)
 # bayer_filter has shape (height, width, channels) and is generally 2x2  [r,g],[g,b], and tiles across the image
+@tf.function
 def apply_bayer_filter(image, bayer_filter_tile):
     bayer_filter_full = tf.tile(bayer_filter_tile, multiples = (image.shape[-3] // bayer_filter_tile.shape[-3], image.shape[-2] // bayer_filter_tile.shape[-2], 1))
     bayer_filtered_image = image * bayer_filter_full
@@ -14,6 +15,7 @@ def apply_bayer_filter(image, bayer_filter_tile):
 
 #bayer_filtered_image has shape (batch, height, width, channels)
 #demosaic_kernels has shape (bayer_height, bayer_width, kernel_height, kernel_width, 1, channels)
+@tf.function
 def apply_demosaic_filter(bayer_filtered_image, demosaic_kernels):
     bayer_height = demosaic_kernels.shape[-6]
     bayer_width = demosaic_kernels.shape[-5]
@@ -71,6 +73,8 @@ bayer_filter_tile_rggb = tf.cast([
         [ [1, 0, 0], [0, 1, 0] ],
         [ [0, 1, 0], [0, 0, 1] ]
     ], dtype = tf.float32)
+
+bayer_filter_tile_grbg = tf.reverse(bayer_filter_tile_rggb, axis = [-2])
 
 
 demosaic_null = [

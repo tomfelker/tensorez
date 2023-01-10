@@ -22,7 +22,9 @@ observation = Observation(
 #    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER')),
 #    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER')),
 #    align_by_center_of_mass=True,
+#    align_by_center_of_mass_only_even_shifts=True,
 #    crop=(512, 512),
+#    crop_align=2,
 #    crop_before_content_align=True,
 #    align_by_content=True,
 #    compute_alignment_transforms_kwargs={'allow_rotation': False, 'allow_scale': False, 'allow_skew': False}
@@ -87,25 +89,38 @@ if debug_alignment and observation.align_by_content:
 #tf.config.run_functions_eagerly(True)
 observation.debug_frame_limit = 1000
 
-final_image = local_lucky(
-    observation,
-    
-    #algorithm = LuckinessAlgorithmLowpassAbsBandpass,
-    #algorithm_kwargs = {'noise_wavelength_pixels': 15, 'crossover_wavelength_pixels': 45},
+# more steps doesn't seem to make any difference
+steps = 1
+known_image = None
+for step in range(steps):
+    if steps > 1:
+        step_output_dir = os.path.join(output_dir, f'step_{step}')
+        os.makedirs(step_output_dir, exist_ok=True)    
+    else:
+        step_output_dir = output_dir
 
-    algorithm=LuckinessAlgorithmFrequencyBands,
-    algorithm_kwargs=dict(noise_wavelength_pixels=10, crossover_wavelength_pixels=80, isoplanatic_patch_pixels=100),
+    known_image = local_lucky(
+        observation,
+        
+        #algorithm = LuckinessAlgorithmLowpassAbsBandpass,
+        #algorithm_kwargs = {'noise_wavelength_pixels': 15, 'crossover_wavelength_pixels': 45},
 
-    #algorithm = LuckinessAlgorithmImageTimesKnown,
-    #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
+        algorithm=LuckinessAlgorithmFrequencyBands,
+        algorithm_kwargs=dict(noise_wavelength_pixels=3, crossover_wavelength_pixels=20, isoplanatic_patch_pixels=50),
 
-    #algorithm = LuckinessAlgorithmImageSquared,
-    #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
+        #algorithm = LuckinessAlgorithmImageTimesKnown,
+        #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
 
-    stdevs_above_mean = 7,
-    steepness=5,
-    debug_output_dir=output_dir,    
-    drizzle=False,
-    drizzle_kwargs={'upscale': 4, 'supersample': 4}
-)
-write_image(final_image, os.path.join(output_dir, 'final_image.png'))
+        #algorithm = LuckinessAlgorithmImageSquared,
+        #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
+
+        stdevs_above_mean = 2,
+        steepness=3,
+        debug_output_dir=step_output_dir,    
+        bayer=True,
+        drizzle=False,
+        drizzle_kwargs={'upscale': 4, 'supersample': 4},
+        average_image=known_image,
+    )
+
+    write_image(known_image, os.path.join(output_dir, f'step_{step}.png'))

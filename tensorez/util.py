@@ -193,6 +193,33 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
         
     return image
 
+def read_bayer_filter(filename):
+    if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
+        return tf.ones(shape = (1, 1, 1, 1))
+
+    elif fnmatch.fnmatch(filename, '*.cr2'):
+        with rawpy.imread(filename) as raw:
+            height = raw.raw_image_visible.shape[-2]
+            width = raw.raw_image_visible.shape[-1]
+            if (
+                chr(raw.color_desc[raw.raw_pattern[0,0]]) == 'R' and
+                chr(raw.color_desc[raw.raw_pattern[0,1]]) == 'G' and
+                chr(raw.color_desc[raw.raw_pattern[1,0]]) == 'G' and
+                chr(raw.color_desc[raw.raw_pattern[1,1]]) == 'B'):
+                return tf.expand_dims(tf.tile(bayer_filter_tile_rggb, multiples = (height // 2, width // 2, 1)), axis = 0)
+    elif fnmatch.fnmatch(filename, '*.ser'):
+        image, header = ser_format.read_frame(filename, frame_index = 0, to_float = False)
+        if header.color_id == ser_format.ColorId.MONO:
+            return tf.ones(shape = (1, 1, 1, 1))
+        elif header.color_id == ser_format.ColorId.BAYER_RGGB:
+            return tf.expand_dims(tf.tile(bayer_filter_tile_rggb, multiples = (header.image_height // 2, header.image_width // 2, 1)), axis = 0)
+        elif header.color_id == ser_format.ColorId.BAYER_GRBG:
+            return tf.expand_dims(tf.tile(bayer_filter_tile_grbg, multiples = (header.image_height // 2, header.image_width // 2, 1)), axis = 0)
+        else:
+            raise RuntimeError(f"SER file {filename} has unrecognized bayer pattern {header.color_id}")
+    return tf.ones(shape = (1, 1, 1, 1))
+
+
 # todo: proper glob support, so callers don't have to do that themselves, and we can support skip and step on things like image*.cr2
 class ImageSequenceReader:
     def __init__(self, filename, skip = 0, step = 1, **kwargs):
@@ -380,6 +407,11 @@ def vector_to_graph(v, ysize = None, line_thickness = 1):
     v = tf.expand_dims(v, axis = 0)
     distances_to_line = tf.math.abs(v - lin) * tf.cast(ysize, tf.float32);
     return tf.maximum(0, tf.minimum(1, (line_thickness / 2) - distances_to_line + 1))
+
+def vector_per_channel_to_graph(vector_cy, **vector_to_graph_kwargs):
+    channels = tf.unstack(vector_cy, axis = 0)
+    channels = list(map((lambda channel: vector_to_graph(channel, **vector_to_graph_kwargs)), channels))
+    return tf.stack(channels, axis = -1)
 
 def adc_function_to_graph(adc, **kwargs):
     channels = tf.unstack(adc, axis = -1)

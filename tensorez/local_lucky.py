@@ -29,9 +29,6 @@ distribution of luckiness.
 import numpy as np
 import tensorflow as tf
 import os
-import datetime
-import sys
-import gc
 from tensorez.util import *
 from tensorez.image_sequence import *
 from tensorez.model import *
@@ -46,25 +43,27 @@ def local_lucky(
     lights,
     algorithm,
     algorithm_kwargs,
+    average_image = None,
     steepness = 3,
     stdevs_above_mean = 3,
     debug_output_dir = None,
     debug_frames = 10,
     drizzle = True,
     drizzle_kwargs = {},
+    bayer = True
 ):
     shape = hwc_to_chw(lights[0]).shape
 
-    algorithm_cache = algorithm.create_cache(shape, lights, debug_output_dir, debug_frames, **algorithm_kwargs)
+    algorithm_cache = algorithm.create_cache(shape, lights, average_image, debug_output_dir, debug_frames, **algorithm_kwargs)
 
     luckiness_mean, luckiness_stdev = pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_output_dir, debug_frames)
 
-    weighted_avg = pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs)
+    weighted_avg = pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs, bayer)
 
     return chw_to_hwc(weighted_avg)
 
 class LuckinessAlgorithmImageSquared:
-    def create_cache(shape_chw, lights, debug_output_dir, debug_frames, isoplanatic_patch_pixels):
+    def create_cache(shape_chw, lights, average_image, debug_output_dir, debug_frames, isoplanatic_patch_pixels):
         isoplanatic_patch_frequency_mask = get_gaussian_lowpass_frequency_mask(shape_chw, isoplanatic_patch_pixels)
         cache = {}
         cache['isoplanatic_patch_frequency_mask'] = isoplanatic_patch_frequency_mask
@@ -83,13 +82,16 @@ class LuckinessAlgorithmImageSquared:
 
 
 class LuckinessAlgorithmImageTimesKnown:
-    def create_cache(shape_chw, lights, debug_output_dir, debug_frames, isoplanatic_patch_pixels):
-        known_image_chw = tf.Variable(tf.zeros(shape_chw), dtype = tf.float32)
-        for image_index, image in enumerate(lights):
-            print(f"Averaging image {image_index + 1} of {len(lights)}")            
-            known_image_chw.assign_add(hwc_to_chw(image))
-            
-        known_image_chw.assign(known_image_chw / len(lights))
+    def create_cache(shape_chw, lights, average_image, debug_output_dir, debug_frames, isoplanatic_patch_pixels):
+        if average_image is not None:
+            known_image_chw = hwc_to_chw(average_image)
+        else:
+            known_image_chw = tf.Variable(tf.zeros(shape_chw), dtype = tf.float32)
+            for image_index, image in enumerate(lights):
+                print(f"Averaging image {image_index + 1} of {len(lights)}")            
+                known_image_chw.assign_add(hwc_to_chw(image))
+                
+            known_image_chw.assign(known_image_chw / len(lights))
 
         if debug_output_dir is not None:
             write_image(chw_to_hwc(known_image_chw), os.path.join(debug_output_dir, 'average_image.png'))
@@ -130,36 +132,42 @@ class LuckinessAlgorithmFrequencyBands:
 
     
     '''
-    def create_cache(shape_chw, lights, debug_output_dir, debug_frames, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels):
-        
-        # we do need the average image, but let's also do the FFT stuff, because it'd be cool to be able to automatically guess the wavelenghs.
-
-        image_variance_state = welfords_init(shape_chw)
-        frequency_mag_variance_state = welfords_init(shape_chw)
-        
-        for image_index, image in enumerate(lights):
-            print(f"Averaging image {image_index + 1} of {len(lights)}")
-
-            image = hwc_to_chw(image)
-            image_variance_state = welfords_update(image_variance_state, image)
-
-            frequency = spatial_to_frequency_domain(image)
-            frequency_mag = tf.abs(frequency)
-            frequency_mag_variance_state = welfords_update(frequency_mag_variance_state, frequency_mag)
+    def create_cache(shape_chw, lights, average_image, debug_output_dir, debug_frames, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels):
 
         isoplanatic_patch_frequency_mask = get_gaussian_lowpass_frequency_mask(shape_chw, isoplanatic_patch_pixels)
         known_frequency_mask = get_gaussian_bandpass_frequency_mask(shape_chw, crossover_wavelength_pixels, isoplanatic_patch_pixels)
         interesting_frequency_mask = get_gaussian_bandpass_frequency_mask(shape_chw, noise_wavelength_pixels, crossover_wavelength_pixels)
 
-        average_image_chw = welfords_get_mean(image_variance_state)
-        # todo: do something cool with known image variance?  or else we could just average it, instead of Welford's, for a slight optimization,
+        # we do need the average image, but let's also do the FFT stuff, because it'd be cool to be able to automatically guess the wavelenghs.
+
+        if average_image is not None:
+            average_image_chw = hwc_to_chw(average_image)
+        else:
+            image_variance_state = welfords_init(shape_chw)
+            frequency_mag_variance_state = welfords_init(shape_chw)
+            
+            for image_index, image in enumerate(lights):
+                print(f"Averaging image {image_index + 1} of {len(lights)}")
+
+                image = hwc_to_chw(image)
+                image_variance_state = welfords_update(image_variance_state, image)
+
+                frequency = spatial_to_frequency_domain(image)
+                frequency_mag = tf.abs(frequency)
+                frequency_mag_variance_state = welfords_update(frequency_mag_variance_state, frequency_mag)
+
+
+            average_image_chw = welfords_get_mean(image_variance_state)
+            # todo: do something cool with known image variance?  or else we could just average it, instead of Welford's, for a slight optimization,
+
+            if debug_output_dir is not None:
+                output_frequency_histograms(debug_output_dir, frequency_mag_variance_state, known_frequency_mask, interesting_frequency_mask)
 
         known_image_chw = apply_frequency_mask(average_image_chw, known_frequency_mask)
 
         if debug_output_dir is not None:
             write_image(chw_to_hwc(average_image_chw), os.path.join(debug_output_dir, 'average_image.png'))
             write_image(chw_to_hwc(known_image_chw), os.path.join(debug_output_dir, 'known_image.png'))
-            output_frequency_histograms(debug_output_dir, frequency_mag_variance_state, known_frequency_mask, interesting_frequency_mask)
             write_image(chw_to_hwc(isoplanatic_patch_frequency_mask), os.path.join(debug_output_dir, 'isoplanatic_patch_frequency_mask.png'))
             write_image(chw_to_hwc(known_frequency_mask), os.path.join(debug_output_dir, 'known_frequency_mask.png'))
             write_image(chw_to_hwc(interesting_frequency_mask), os.path.join(debug_output_dir, 'interesting_frequency_mask.png'))
@@ -182,18 +190,34 @@ class LuckinessAlgorithmFrequencyBands:
         interesting_image_chw = apply_frequency_mask(image_chw, interesting_frequency_mask)
         redundant_image_chw = apply_frequency_mask(image_chw, known_frequency_mask)
 
-        new_info_chw = tf.abs(interesting_image_chw - known_image_chw)
-        wrong_info_chw = tf.abs(redundant_image_chw - known_image_chw)
+        # abs or square?  abs kinda seems a little better maybe, and unfortunately i don't know any theory for which would be better
+        # or maybe square + blur + sqrt?
 
-        luckiness_chw = new_info_chw - wrong_info_chw
+        if True:
+            if True:
+                new_info_chw = tf.abs(interesting_image_chw - known_image_chw)
+                wrong_info_chw = tf.abs(redundant_image_chw - known_image_chw)
+            else:
+                new_info_chw = tf.square(interesting_image_chw - known_image_chw)
+                wrong_info_chw = tf.square(redundant_image_chw - known_image_chw)
 
-        lowpass_luckiness_chw = apply_frequency_mask(luckiness_chw, isoplanatic_patch_frequency_mask)
+            luckiness_chw = new_info_chw - wrong_info_chw
+            lowpass_luckiness_chw = apply_frequency_mask(luckiness_chw, isoplanatic_patch_frequency_mask)
+
+        if False:
+            # or maybe square + blur + sqrt?
+            new_info_chw = tf.square(interesting_image_chw - known_image_chw)
+            wrong_info_chw = tf.square(redundant_image_chw - known_image_chw)
+
+            new_info_chw = apply_frequency_mask(new_info_chw, isoplanatic_patch_frequency_mask)
+            wrong_info_chw = apply_frequency_mask(wrong_info_chw, isoplanatic_patch_frequency_mask)
+            lowpass_luckiness_chw = tf.sqrt(new_info_chw) - tf.sqrt(wrong_info_chw)
 
         return lowpass_luckiness_chw
 
 
 class LuckinessAlgorithmLowpassAbsBandpass:
-    def create_cache(shape, lights, debug_output_dir, debug_frames, crossover_wavelength_pixels, noise_wavelength_pixels):
+    def create_cache(shape, lights, average_image, debug_output_dir, debug_frames, crossover_wavelength_pixels, noise_wavelength_pixels):
         known_frequency_mask = get_gaussian_lowpass_frequency_mask(shape, crossover_wavelength_pixels)
         if debug_output_dir is not None:
             write_image(chw_to_hwc(known_frequency_mask), os.path.join(debug_output_dir, 'known_frequency_mask.png'))
@@ -254,9 +278,9 @@ def get_frequency_bins(shape_chw):
     return dist_from_corner
 
 def write_hist(name, data, bins, bins_hist, num_bins, debug_output_dir):
-    hist = tf.math.divide_no_nan(tf.math.bincount(bins, weights = data, minlength=num_bins, maxlength=num_bins), bins_hist)
+    hist = tf.math.divide_no_nan(bincount_along_axis(bins, weights = data, length=num_bins, axis = -3), bins_hist)
     hist = hist / tf.reduce_max(hist)
-    hist_graph = vector_to_graph(hist)
+    hist_graph = vector_per_channel_to_graph(hist)
     write_image(hist_graph, os.path.join(debug_output_dir, f'{name}.png'))
     return hist_graph
 
@@ -289,8 +313,14 @@ def pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_ou
     return luckiness_mean, luckiness_stdev
 
 
-def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs):
+def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs, bayer):
     # second pass
+    if bayer:
+        bayer_filter = lights.read_bayer_filter_unaligned()
+
+        #if debug_output_dir is not None:
+        #    write_image(bayer_filter, os.path.join(debug_output_dir, "bayer_filter.png"))
+
     total_weight = None
     weighted_avg = None
     for image_index, image in enumerate(lights):
@@ -299,35 +329,44 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
         luckiness = algorithm.compute_luckiness(image, algorithm_cache, **algorithm_kwargs)
 
         luckiness_zero_mean_unit_variance = tf.math.divide_no_nan(luckiness - luckiness_mean, luckiness_stdev)
-        del luckiness
 
         if debug_output_dir is not None and image_index < debug_frames:
             write_image(chw_to_hwc(luckiness_zero_mean_unit_variance), os.path.join(debug_output_dir, "luckiness_zero_mean_unit_variance_{:08d}.png".format(image_index)), normalize = True)
         
         weight_image = tf.math.sigmoid((luckiness_zero_mean_unit_variance - stdevs_above_mean) * steepness)
 
-        if drizzle:
+        # in these cases, we have input space weights (the drizzle mask, or the bayer mask, or todo dead pixel stuff), so we need
+        # to align those (and possibly also align the image)
+        if drizzle or bayer:
             raw_image_bhwc = lights.read_cooked_image(image_index, skip_content_align = True)
             alignment_transform = lights.alignment_transforms[image_index]
             theta = tensorez.align.alignment_transform_to_stn_theta(alignment_transform)
-            gc.collect()
-            drizzled_image_bhwc, drizzled_weights_bhwc = tensorez.drizzle.drizzle(raw_image_bhwc, theta, **drizzle_kwargs, )
-            del raw_image_bhwc
-            drizzled_image = hwc_to_chw(drizzled_image_bhwc)
-            del drizzled_image_bhwc
-            drizzled_weights = hwc_to_chw(drizzled_weights_bhwc)
-            del drizzled_weights_bhwc
 
-            weight_image = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(chw_to_hwc(weight_image), tf.eye(2, 3), out_dims = (drizzled_image.shape[-2], drizzled_image.shape[-1])))
+            if bayer:
+                inputspace_weights_bhwc = bayer_filter
+            else:
+                inputspace_weights_bhwc = None
+                # todo: dead pixel stuff, variance of darks, also as an input weight
 
-            # replace image and weight_image with properly upscaled versions
-            image = drizzled_image
-            del drizzled_image
-            weight_image *= drizzled_weights
-            del drizzled_weights
+            if drizzle:
+                # note: this replaces image, above, which was read with the STN based alignment, with a possibly bigger one.
+                image, aligned_weights = tensorez.drizzle.drizzle(raw_image_bhwc, theta, inputspace_weights_bhwc = inputspace_weights_bhwc, **drizzle_kwargs, )
+                image = hwc_to_chw(image)
+                aligned_weights = hwc_to_chw(aligned_weights)
+
+                # drizzle probably made things bigger, so need to upscale the weights too
+                if weight_image.shape != image.shape:
+                    weight_image = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(chw_to_hwc(weight_image), tf.eye(2, 3), out_dims = (image.shape[-2], image.shape[-1])))
+
+            else:
+                assert(inputspace_weights_bhwc is not None)
+                aligned_weights = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(inputspace_weights_bhwc, theta))
+
+            weight_image *= aligned_weights
 
         if debug_output_dir is not None and image_index < debug_frames:
             write_image(chw_to_hwc(weight_image), os.path.join(debug_output_dir, "luckiness_weights_{:08d}.png".format(image_index)))
+            write_image(chw_to_hwc(weight_image), os.path.join(debug_output_dir, "luckiness_weights_normalized{:08d}.png".format(image_index)), normalize=True)
 
 
         if total_weight is None:
@@ -436,13 +475,24 @@ def welfords_get_stdev(existingAggregate):
     (count, mean, M2) = existingAggregate
     return tf.sqrt(M2 / count)
 
+def bincount_along_axis(bins, weights, length, axis):
+    # todo: if this didn't work, we'd need to unstack both
+    bins = tf.squeeze(bins, [axis])
+
+    bincounts = []
+    for weights_slice in tf.unstack(weights, axis=axis):
+        bincounts.append(tf.math.bincount(bins, weights=weights_slice, minlength=length, maxlength=length))
+    # everything will have been flattened
+    stacked = tf.stack(bincounts)
+    return stacked
+
 def output_frequency_histograms(debug_output_dir, frequency_mag_variance_state, known_frequency_mask, interesting_frequency_mask):
     frequency_mag_mean = welfords_get_mean(frequency_mag_variance_state)
     frequency_mag_stdev = welfords_get_stdev(frequency_mag_variance_state)
 
-    # discard channel info
-    frequency_mag_mean = tf.reduce_mean(frequency_mag_mean, axis = -3, keepdims=True)
-    frequency_mag_stdev = tf.reduce_mean(frequency_mag_stdev, axis = -3, keepdims=True)
+    # discard channel info    
+    #frequency_mag_mean = tf.reduce_mean(frequency_mag_mean, axis = -3, keepdims=True)
+    #frequency_mag_stdev = tf.reduce_mean(frequency_mag_stdev, axis = -3, keepdims=True)
 
     shape = frequency_mag_mean.shape
     bins = get_frequency_bins(shape)
@@ -452,10 +502,10 @@ def output_frequency_histograms(debug_output_dir, frequency_mag_variance_state, 
     bins_hist = tf.math.bincount(bins, minlength=num_bins, maxlength=num_bins)
     bins_hist = tf.cast(bins_hist, dtype=tf.float32)
 
-    frequency_mag_hist = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_mean, minlength=num_bins, maxlength=num_bins), bins_hist)
-    frequency_mag_hist_hi = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_mean + frequency_mag_stdev, minlength=num_bins, maxlength=num_bins), bins_hist)
-    frequency_mag_hist_lo = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_mean - frequency_mag_stdev, minlength=num_bins, maxlength=num_bins), bins_hist)
-    frequency_stdev_hist = tf.math.divide_no_nan(tf.math.bincount(bins, weights = frequency_mag_stdev, minlength=num_bins, maxlength=num_bins), bins_hist)
+    frequency_mag_hist = tf.math.divide_no_nan(bincount_along_axis(bins, weights = frequency_mag_mean, length=num_bins, axis = -3), bins_hist)
+    frequency_mag_hist_hi = tf.math.divide_no_nan(bincount_along_axis(bins, weights = frequency_mag_mean + frequency_mag_stdev, length=num_bins, axis = -3), bins_hist)
+    frequency_mag_hist_lo = tf.math.divide_no_nan(bincount_along_axis(bins, weights = frequency_mag_mean - frequency_mag_stdev, length=num_bins, axis = -3), bins_hist)
+    frequency_stdev_hist = tf.math.divide_no_nan(bincount_along_axis(bins, weights = frequency_mag_stdev, length=num_bins, axis = -3), bins_hist)
     frequency_mag_uncertainty_hist = tf.math.divide_no_nan(frequency_stdev_hist, frequency_mag_hist)
 
     xmax = tf.reduce_max(frequency_mag_hist_hi)
@@ -463,17 +513,17 @@ def output_frequency_histograms(debug_output_dir, frequency_mag_variance_state, 
     frequency_mag_hist_hi /= xmax
     frequency_mag_hist_lo /= xmax
 
-    red = tf.reshape(tf.constant([1.0, 0, 0]), shape=[1, 3, 1, 1])
-    green = tf.reshape(tf.constant([0, 1.0, 0]), shape=[1, 3, 1, 1])
-    blue = tf.reshape(tf.constant([0, 0, 1.0]), shape=[1, 3, 1, 1])
+    red = tf.reshape(tf.constant([1.0, 0, 0]), shape=[1, 1, 1, 3])
+    green = tf.reshape(tf.constant([0, 1.0, 0]), shape=[1, 1, 1, 3])
+    blue = tf.reshape(tf.constant([0, 0, 1.0]), shape=[1, 1, 1, 3])
 
-    frequency_mag_hist_chart = vector_to_graph(frequency_mag_hist)
-    frequency_mag_hist_chart += vector_to_graph(frequency_mag_hist_hi) * red
-    frequency_mag_hist_chart += vector_to_graph(frequency_mag_hist_lo) * green
-    write_image(chw_to_hwc(frequency_mag_hist_chart), os.path.join(debug_output_dir, 'histogram_frequency_mag.png'))
+    frequency_mag_hist_chart = vector_per_channel_to_graph(frequency_mag_hist)
+    frequency_mag_hist_chart += vector_per_channel_to_graph(frequency_mag_hist_hi)
+    frequency_mag_hist_chart += vector_per_channel_to_graph(frequency_mag_hist_lo)
+    write_image(frequency_mag_hist_chart, os.path.join(debug_output_dir, 'histogram_frequency_mag.png'))
 
     frequency_mag_uncertainty_hist /= tf.reduce_max(frequency_mag_uncertainty_hist)
-    frequency_mag_uncertainty_hist_chart = vector_to_graph(frequency_mag_uncertainty_hist)
+    frequency_mag_uncertainty_hist_chart = vector_per_channel_to_graph(frequency_mag_uncertainty_hist)
     write_image(frequency_mag_uncertainty_hist_chart, os.path.join(debug_output_dir, 'histogram_frequency_mag_uncertainty.png'))
 
     histogram_lucky_known = write_hist('histogram_lucky_known', tf.expand_dims(known_frequency_mask, axis = -4), bins, bins_hist, num_bins, debug_output_dir)
@@ -483,5 +533,5 @@ def output_frequency_histograms(debug_output_dir, frequency_mag_variance_state, 
     write_hist('histogram_stdev', frequency_mag_stdev, bins, bins_hist, num_bins, debug_output_dir)
     histogram_stdev_over_mean = write_hist('histogram_stdev_over_mean', frequency_mag_stdev / frequency_mag_mean, bins, bins_hist, num_bins, debug_output_dir)
 
-    combo = histogram_lucky_known * blue + histogram_lucky_interesting * green + histogram_stdev_over_mean
-    write_image(chw_to_hwc(combo), os.path.join(debug_output_dir, 'histogram_combo.png'))
+    combo = histogram_lucky_known * (red + blue) + histogram_lucky_interesting * (green + blue) + histogram_stdev_over_mean
+    write_image(combo, os.path.join(debug_output_dir, 'histogram_combo.png'))

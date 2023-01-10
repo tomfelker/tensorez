@@ -6,7 +6,7 @@ import os.path
 import numpy as np
 
 class Observation:
-    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 1, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}):
+    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 1, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}, align_by_center_of_mass_only_even_shifts = False):
         self.lights = lights
         self.darks = darks
         self.align_by_center_of_mass = align_by_center_of_mass
@@ -16,6 +16,7 @@ class Observation:
         self.crop_align = crop_align
         self.crop_before_align = crop_before_align
         self.crop_before_content_align = crop_before_content_align
+        self.align_by_center_of_mass_only_even_shifts = align_by_center_of_mass_only_even_shifts
 
         self.dark_image = None
         self.alignment_transforms = None
@@ -79,6 +80,8 @@ class Observation:
             hash_info += f"crop_before_align: {self.crop_before_align}\n"
             hash_info += f"crop_before_content_align: {self.crop_before_content_align}\n"
         hash_info += f"align_by_center_of_mass: {self.align_by_center_of_mass}\n"
+        if self.align_by_center_of_mass:
+            hash_info += f"align_by_center_of_mass_only_even_shifts: {self.align_by_center_of_mass_only_even_shifts}\n"
         hash_info += f"compute_alignment_transform({self.compute_alignment_transforms_kwargs})\n"
 
         hash = hashlib.sha256(repr(hash_info).encode('utf-8')).hexdigest()
@@ -124,7 +127,7 @@ class Observation:
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
 
         if self.align_by_center_of_mass:
-            image = align_by_center_of_mass(image)
+            image = align_by_center_of_mass(image, only_even_shifts = self.align_by_center_of_mass_only_even_shifts)
 
         if self.crop_before_content_align and self.crop is not None:
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
@@ -138,6 +141,15 @@ class Observation:
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
 
         return image
+
+    def read_bayer_filter_unaligned(self):
+        bayer_filter = self.lights.read_bayer_filter()
+        if self.align_by_center_of_mass:
+            assert(self.align_by_center_of_mass_only_even_shifts)
+        if self.crop is not None:
+            assert(self.crop_align == 2)
+            bayer_filter = crop_image(bayer_filter, crop=self.crop, crop_align=self.crop_align)
+        return bayer_filter
 
     def __getitem__(self, index):
         return self.read_cooked_image(index)
