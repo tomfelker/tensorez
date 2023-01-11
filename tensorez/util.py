@@ -495,3 +495,35 @@ class LimitedIterable:
     def __iter__(self):
         for i in range(0, len(self)):
             yield self[i]
+
+# Straight from https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm.
+# Interestingly, the very functional-programming style they used is perfect for avoiding tf.function weirdness.
+
+def welfords_init(shape):
+    # hmm, I can never tell if I should use tf.variable or trust in the tracing magic
+    count = tf.zeros([])
+    mean = tf.zeros(shape)
+    M2 = tf.zeros(shape)
+    return (count, mean, M2)
+
+@tf.function
+def welfords_update(existingAggregate, newValue):
+    (count, mean, M2) = existingAggregate
+    count += 1
+    delta = newValue - mean
+    mean += delta / count
+    delta2 = newValue - mean
+    M2 += delta * delta2
+    return (count, mean, M2)
+
+def welfords_get_mean(existingAggregate):
+    (count, mean, M2) = existingAggregate
+    return mean
+
+def welfords_get_variance(existingAggregate):
+    (count, mean, M2) = existingAggregate
+    return M2 / count
+
+def welfords_get_stdev(existingAggregate):
+    (count, mean, M2) = existingAggregate
+    return tf.sqrt(M2 / count)

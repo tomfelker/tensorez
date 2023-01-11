@@ -114,7 +114,7 @@ for step in range(steps):
         #algorithm = LuckinessAlgorithmImageSquared,
         #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
 
-        stdevs_above_mean = 2,
+        stdevs_above_mean = 4,
         steepness=3,
         debug_output_dir=step_output_dir,    
         bayer=True,
