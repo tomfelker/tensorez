@@ -87,7 +87,7 @@ if debug_alignment and observation.align_by_content:
 
 
 #tf.config.run_functions_eagerly(True)
-observation.debug_frame_limit = 1000
+#observation.debug_frame_limit = 100
 
 # more steps doesn't seem to make any difference
 steps = 1
@@ -106,7 +106,7 @@ for step in range(steps):
         #algorithm_kwargs = {'noise_wavelength_pixels': 15, 'crossover_wavelength_pixels': 45},
 
         algorithm=LuckinessAlgorithmFrequencyBands,
-        algorithm_kwargs=dict(noise_wavelength_pixels=3, crossover_wavelength_pixels=20, isoplanatic_patch_pixels=50),
+        algorithm_kwargs=dict(noise_wavelength_pixels=10, crossover_wavelength_pixels=45, isoplanatic_patch_pixels=150, misalignment_penalty_factor = 3),
 
         #algorithm = LuckinessAlgorithmImageTimesKnown,
         #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
@@ -123,4 +123,4 @@ for step in range(steps):
         average_image=known_image,
     )
 
-    write_image(known_image, os.path.join(output_dir, f'step_{step}.png'))
+    write_image(known_image, os.path.join(output_dir, f'local_lucky_step_{step}.png'))

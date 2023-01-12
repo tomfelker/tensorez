@@ -70,25 +70,33 @@ def local_lucky(
 
 def pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_output_dir, debug_frames):
     luckiness_variance_state = welfords_init(shape)
-    image_avg = tf.Variable(tf.zeros(shape))
+
+    if debug_output_dir is not None:
+        image_avg = tf.Variable(tf.zeros(shape))
 
     # first pass
     for image_index, image in enumerate(lights):
         image = hwc_to_chw(image)
 
-        image_avg.assign_add(image)
+        if debug_output_dir is not None:
+            image_avg.assign_add(image)
 
-        luckiness = algorithm.compute_luckiness(image, algorithm_cache, **algorithm_kwargs)
-        if debug_output_dir is not None and image_index < debug_frames:
+        want_debug_images = (debug_output_dir is not None and image_index < debug_frames)
+
+        luckiness, debug_images = algorithm.compute_luckiness(image, algorithm_cache, want_debug_images, **algorithm_kwargs)
+
+        if want_debug_images:
             write_image(chw_to_hwc(luckiness), os.path.join(debug_output_dir, "luckiness_{:08d}.png".format(image_index)), normalize = True)
+            for debug_image_name, debug_image in debug_images.items():
+                write_image(chw_to_hwc(debug_image), os.path.join(debug_output_dir, f"{debug_image_name}_{image_index:08d}.png"))
+
 
         luckiness_variance_state = welfords_update(luckiness_variance_state, luckiness)
         print(f"Pass 1 of 2, processed image {image_index + 1} of {len(lights)}")
 
-    image_avg.assign(image_avg / len(lights))
-
     if debug_output_dir is not None:
-        write_image(chw_to_hwc(image_avg), os.path.join(debug_output_dir, 'unweighted_avg.png'))
+        image_avg.assign(image_avg / len(lights))
+        write_image(chw_to_hwc(image_avg), os.path.join(debug_output_dir, 'local_lucky_unweighted_average.png'))
 
     luckiness_mean = welfords_get_mean(luckiness_variance_state)
     luckiness_stdev = welfords_get_stdev(luckiness_variance_state)
@@ -109,7 +117,7 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
     for image_index, image in enumerate(lights):
         image = hwc_to_chw(image)
 
-        luckiness = algorithm.compute_luckiness(image, algorithm_cache, **algorithm_kwargs)
+        luckiness, debug_images = algorithm.compute_luckiness(image, algorithm_cache, want_debug_images = False, **algorithm_kwargs)
 
         luckiness_zero_mean_unit_variance = tf.math.divide_no_nan(luckiness - luckiness_mean, luckiness_stdev)
 

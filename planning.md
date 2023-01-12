@@ -56,6 +56,9 @@ To do good moon or extended object lucky imaging, need local alignment.
     - the 'agreement' stuff, ultimately also part of luckiness, in terms of average image (so, post-alignment, output space)
     - the final weight / sum stuff needs to be in output space
 
+- frequency bands is working well - but, noticing some aliasing stuff
+    - would be better to do any processing of the original image (bandpass filtering mostly) before aligning it, to avoid aliasing messing with stuff
+
 ## Bayer
 - currently, I'm mostly demosasicing manually at the start, and then ignoring it from then on
 - recently added support for Bayer in the local lucky image drizzling process (or non-drizzle)
