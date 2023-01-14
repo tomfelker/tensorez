@@ -18,6 +18,7 @@ Those abbreviations mean:
     i: coordinate in input image (0 is x_i, 1 is y_i)
     o: coordinate in output image (0 is x_o, 1 is y_o)
     s: sample (for doing supersampling)
+    p: pixel (for when each pixel in the output image is considered separately)
 
 """
 
@@ -109,11 +110,14 @@ def drizzle_function(input_image_bhwc, theta, upscale, pixfrac, out_shape_hw, in
     grid_bihw = affine_grid_generator(out_h, out_w, theta)
 
     if supersample != 1 or jitter is True:
-        # TODO: This is doing it numerically, and computing the jacobian at every pixel.
-        # that'll be helpful if we have per-pixel shifts (geometric distortion, local alignment, that sort of thing)
-        # but it's actually completely pointless for affine transforms, since the valaues will actually be the same for each pixel.
-        # so, in that case, we could save some memory and time by just giving a single value that can be broadcasted as needed.
-        jacobian_biohw = jacobian_from_grid(grid_bihw)
+        if False:
+            # This is doing it numerically, and computing the jacobian at every pixel.
+            # that'll be helpful if we have per-pixel shifts (geometric distortion, local alignment, that sort of thing)
+            # but it's actually completely pointless for affine transforms, since the valaues will actually be the same for each pixel.            
+            jacobian_biohw = jacobian_from_grid(grid_bihw)
+        else:
+            # so in this case, we can save some memory and time by just giving a single value that can be broadcasted as needed.
+            jacobian_biohw = jacobian_from_theta(theta)
     else:
         # not needed when we're not supersampling.
         jacobian_biohw = None
@@ -225,12 +229,25 @@ def affine_grid_generator(out_h, out_w, theta):
 
     return batch_grids
 
+def jacobian_from_theta(theta):    
+    # theta is shape biO (batch, input coordinate index, output homogenous coordinate index)
+    # sampling_grid is shape bOp  (batch, output homogenous coordinate index, pixel (later expanded to h,w))
+    # input_coord = theta * sampling_grid, last two dims are io * op, so you get ip
+    # so batch_grids should be shape (batch, input coordinate index, pixel)
+    # then reshaped to (batch, input coordinate index, height, width)
+
+    # turns out the answer is pretty trivial:
+    jacobian_bio = theta[:, :, 0:2]
+
+    jacobian_biohw = tf.expand_dims(tf.expand_dims(jacobian_bio, -1), -1)
+    return jacobian_biohw
+
 def jacobian_from_grid(grid_bihw):
     out_w = grid_bihw.shape[-1]
     out_h = grid_bihw.shape[-2]
 
     # we have to pad so we don't get weird edge effects
-    padded_grid_bihw = tf.pad(grid_bihw, paddings = ((0, 0), (0, 0), (1, 1), (1, 1)), mode = 'REFLECT')
+    padded_grid_bihw = tf.pad(grid_bihw, paddings = ((0, 0), (0, 0), (1, 1), (1, 1)), mode = 'SYMMETRIC')
 
     # but we need to keep track of whether our input coordinates were valid, or just copies made by the padding operation - in which case,
     # we'll need to weight jacobian twice as heavily to compensate for the 0 derivative on this half.
@@ -240,23 +257,23 @@ def jacobian_from_grid(grid_bihw):
     padded_valid_bihw = tf.pad(valid_bihw, paddings = ((0, 0), (0, 0), (1, 1), (1, 1)), mode = 'CONSTANT', constant_values = 0)
 
     # these are copies of grid, shifted in each direction.  Read oxm1 as "output x minus 1"
-    padded_grid_oxm1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = -1)
-    padded_grid_oxp1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = -1)
-    padded_grid_oym1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = -2)
-    padded_grid_oyp1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = -2)
+    padded_grid_oxm1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = -1)
+    padded_grid_oxp1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = -1)
+    padded_grid_oym1_bihw = tf.roll(padded_grid_bihw, shift =  1, axis = -2)
+    padded_grid_oyp1_bihw = tf.roll(padded_grid_bihw, shift = -1, axis = -2)
 
     # these are copies of valid, shifted in each direction.  Read oxm1 as "output x minus 1"
-    padded_valid_oxm1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = -1)
-    padded_valid_oxp1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = -1)
-    padded_valid_oym1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = -2)
-    padded_valid_oyp1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = -2)
+    padded_valid_oxm1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = -1)
+    padded_valid_oxp1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = -1)
+    padded_valid_oym1_bihw = tf.roll(padded_valid_bihw, shift =  1, axis = -2)
+    padded_valid_oyp1_bihw = tf.roll(padded_valid_bihw, shift = -1, axis = -2)
 
     # the denominators account for how many valid coordinates we had (which should be 1 or 2)
 
     # read as "change in input coordinate i per change in output x coordinate"
-    di_over_dxo_bihw = (padded_grid_oxp1_bihw - padded_grid_oxm1_bihw) / ((padded_valid_oxp1_bihw + padded_valid_oxm1_bihw) / out_w)
+    di_over_dxo_bihw = (padded_grid_oxp1_bihw - padded_grid_oxm1_bihw) / ((padded_valid_oxp1_bihw + padded_valid_oxm1_bihw) * (2 / out_w))
     # read as "change in input coordinate i per change in output y coordinate"
-    di_over_dyo_bihw = (padded_grid_oyp1_bihw - padded_grid_oym1_bihw) / ((padded_valid_oyp1_bihw + padded_valid_oym1_bihw) / out_h)
+    di_over_dyo_bihw = (padded_grid_oyp1_bihw - padded_grid_oym1_bihw) / ((padded_valid_oyp1_bihw + padded_valid_oym1_bihw) * (2 / out_h))
     
     # could also have named this di_over_do_biohw, which you could read as "change in input coordinate i per change in output coordinate o"
     padded_jacobian_biohw = tf.stack([di_over_dxo_bihw, di_over_dyo_bihw], axis = 2)
@@ -294,14 +311,16 @@ def drizzle_sampler(input_bhwc, inputspace_weights_bhwc, normalized_coords_bihw,
 
     # convert from "samples" to "normalized output coordinates"
     output_size_bhwso = tf.cast(tf.reshape(tf.stack([ow, oh]), shape = (1, 1, 1, 1, 2)), dtype = tf.float32)
-    output_perturbation_bhwso = ((output_perturbation_samples_bhwso + 0.5) / supersample - 0.5) / output_size_bhwso
+    output_perturbation_bhwso = ((output_perturbation_samples_bhwso + 0.5) / supersample - 0.5) * (2.0 / output_size_bhwso)
     
     normalized_coords_bihws = tf.expand_dims(normalized_coords_bihw, axis = -1)
 
     # This is summing over o (the index of the output coordinate).  In other words, at each sample, we're perturbing the output coordinate
     # by given amounts along the output-x and output-y directions, and for each of those directions, we must multiply by the the jacobian
     # to figure out how much to perturb the input x and y coordinates.
-    input_perturbations_bihws = tf.einsum('biohw,bhwso->bihws', jacobian_biohw, output_perturbation_bhwso)
+    #input_perturbations_bihws = tf.einsum('biohw,bhwso->bihws', jacobian_biohw, output_perturbation_bhwso)
+    # ellipsis lets it broadcast along hw
+    input_perturbations_bihws = tf.einsum('bio...,b...so->bi...s', jacobian_biohw, output_perturbation_bhwso)
 
     perturbed_normalized_coords_bihws = normalized_coords_bihws + input_perturbations_bihws
 
