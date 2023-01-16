@@ -39,6 +39,7 @@ import tensorez.drizzle
 import tensorez.align
 import tensorez.modified_stn
 from tensorez.luckiness import *
+import gc
 
 def local_lucky(
     lights,
@@ -51,7 +52,8 @@ def local_lucky(
     debug_frames = 10,
     drizzle = True,
     drizzle_kwargs = {},
-    bayer = True
+    bayer = True,
+    low_memory = False
 ):
     shape = hwc_to_chw(lights[0]).shape
 
@@ -59,7 +61,7 @@ def local_lucky(
 
     luckiness_mean, luckiness_stdev = pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_output_dir, debug_frames)
 
-    weighted_avg = pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs, bayer)
+    weighted_avg = pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs, bayer, low_memory)
 
     return chw_to_hwc(weighted_avg)
 
@@ -104,7 +106,7 @@ def pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_ou
     return luckiness_mean, luckiness_stdev
 
 
-def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs, bayer):
+def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs, bayer, low_memory):
     # second pass
     if bayer:
         bayer_filter = lights.read_bayer_filter_unaligned()
@@ -123,13 +125,17 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
 
         if debug_output_dir is not None and image_index < debug_frames:
             write_image(chw_to_hwc(luckiness_zero_mean_unit_variance), os.path.join(debug_output_dir, "luckiness_zero_mean_unit_variance_{:08d}.png".format(image_index)), normalize = True)
+        del debug_images
+        gc.collect()
         
         weight_image = tf.math.sigmoid((luckiness_zero_mean_unit_variance - stdevs_above_mean) * steepness)
+        del luckiness_zero_mean_unit_variance
+        gc.collect()
 
         # in these cases, we have input space weights (the drizzle mask, or the bayer mask, or todo dead pixel stuff), so we need
         # to align those (and possibly also align the image)
         if drizzle or bayer:
-            raw_image_bhwc = lights.read_cooked_image(image_index, skip_content_align = True)
+            
             alignment_transform = lights.alignment_transforms[image_index]
             theta = tensorez.align.alignment_transform_to_stn_theta(alignment_transform)
 
@@ -141,19 +147,27 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
 
             if drizzle:
                 # note: this replaces image, above, which was read with the STN based alignment, with a possibly bigger one.
-                image, aligned_weights = tensorez.drizzle.drizzle(raw_image_bhwc, theta, inputspace_weights_bhwc = inputspace_weights_bhwc, **drizzle_kwargs, )
+                image = lights.read_cooked_image(image_index, skip_content_align = True)
+                gc.collect()
+                image, aligned_weights = tensorez.drizzle.drizzle(image, theta, inputspace_weights_bhwc = inputspace_weights_bhwc, low_memory=low_memory, **drizzle_kwargs, )
+                gc.collect()
                 image = hwc_to_chw(image)
+                gc.collect()
                 aligned_weights = hwc_to_chw(aligned_weights)
+                gc.collect()
 
                 # drizzle probably made things bigger, so need to upscale the weights too
                 if weight_image.shape != image.shape:
-                    weight_image = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(chw_to_hwc(weight_image), tf.eye(2, 3), out_dims = (image.shape[-2], image.shape[-1])))
+                    weight_image = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(chw_to_hwc(weight_image), tf.eye(2, 3), out_dims = (image.shape[-2], image.shape[-1]), low_memory=low_memory))
+                    gc.collect()
 
             else:
                 assert(inputspace_weights_bhwc is not None)
-                aligned_weights = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(inputspace_weights_bhwc, theta))
+                aligned_weights = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(inputspace_weights_bhwc, theta, low_memory=low_memory))
 
             weight_image *= aligned_weights
+            del aligned_weights
+            gc.collect()
 
         if debug_output_dir is not None and image_index < debug_frames:
             write_image(chw_to_hwc(weight_image), os.path.join(debug_output_dir, "luckiness_weights_{:08d}.png".format(image_index)))
@@ -167,12 +181,17 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
 
         total_weight.assign_add(weight_image)
         weighted_avg.assign_add(weight_image * image)
+        del weight_image
+        del image
+        gc.collect()
         print(f"Pass 2 of 2, processed image {image_index + 1} of {len(lights)}")
 
     weighted_avg.assign(tf.math.divide_no_nan(weighted_avg, total_weight))
     if debug_output_dir is not None:
         avg_num_frames = tf.reduce_mean(total_weight)
-        write_image(chw_to_hwc(weighted_avg), os.path.join(debug_output_dir, f"local_lucky_{stdevs_above_mean}_stdevs_{steepness}_steepness_{int(avg_num_frames)}_of_{len(lights)}.png"))
+        if math.isnan(avg_num_frames):
+            avg_num_frames = 'nan'
+        write_image(chw_to_hwc(weighted_avg), os.path.join(debug_output_dir, f"local_lucky_{stdevs_above_mean}_stdevs_{steepness}_steepness_{avg_num_frames}_of_{len(lights)}.png"))
         write_image(chw_to_hwc(total_weight), os.path.join(debug_output_dir, "total_weight.png"), normalize = True)
 
     return weighted_avg

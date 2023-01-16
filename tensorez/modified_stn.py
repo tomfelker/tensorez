@@ -6,9 +6,9 @@
 # Tom Felker
 
 import tensorflow as tf
+import gc
 
-
-def spatial_transformer_network(input_fmap, theta, out_dims=None, **kwargs):
+def spatial_transformer_network(input_fmap, theta, out_dims=None, low_memory=False):
     """
     Spatial Transformer Network layer implementation as described in [1].
 
@@ -45,22 +45,47 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, **kwargs):
          (https://arxiv.org/abs/1506.02025)
 
     """
-    # grab input dimensions
-    B = tf.shape(input_fmap)[0]
     H = tf.shape(input_fmap)[1]
-    W = tf.shape(input_fmap)[2]
+    W = tf.shape(input_fmap)[2]    
 
-    # reshape theta to (B, 2, 3)
-    theta = tf.reshape(theta, [B, 2, 3])
-
-    # generate grids of same size or upsample/downsample if specified
     if out_dims:
         out_H = out_dims[0]
         out_W = out_dims[1]
-        batch_grids = affine_grid_generator(out_H, out_W, theta)
     else:
-        batch_grids = affine_grid_generator(H, W, theta)
+        out_H = H
+        out_W = W
 
+    if low_memory:
+        gc.collect()
+
+        B = tf.shape(input_fmap)[0]
+        C = tf.shape(input_fmap)[3]
+
+        output_fmap = tf.Variable(tf.zeros(shape = (B, out_H, out_W, C)))
+
+        for b in tf.range(B):
+            for c in tf.range(C):
+                chunk_fmap = spatial_transformer_network_function(input_fmap[b:b+1, :, :, c:c+1], theta, out_H, out_W)
+                # assign_add doesn't work in eager mode
+                output_fmap[b:b+1, :, :, c:c+1].assign(output_fmap[b:b+1, :, :, c:c+1] + chunk_fmap)
+                del chunk_fmap
+                gc.collect()
+                
+        return output_fmap
+
+    else:
+        return spatial_transformer_network_function(input_fmap, theta, out_H, out_W)    
+
+
+@tf.function
+def spatial_transformer_network_function(input_fmap, theta, out_H, out_W):
+
+    B = tf.shape(input_fmap)[0]
+
+    theta = tf.reshape(theta, [B, 2, 3])
+
+    batch_grids = affine_grid_generator(out_H, out_W, theta)
+    
     x_s = batch_grids[:, 0, :, :]
     y_s = batch_grids[:, 1, :, :]
 
@@ -223,11 +248,20 @@ def bilinear_sampler(img, x, y):
     Ic = get_pixel_value(img, x1_clipped, y0_clipped)
     Id = get_pixel_value(img, x1_clipped, y1_clipped)
 
+    del x0_clipped
+    del x1_clipped
+    del y0_clipped
+    del y1_clipped
+    del img
+    gc.collect()
+
     # recast as float for delta calculation
     x0 = tf.cast(x0, 'float32')
     x1 = tf.cast(x1, 'float32')
     y0 = tf.cast(y0, 'float32')
     y1 = tf.cast(y1, 'float32')
+
+    gc.collect()
 
     # calculate deltas
     wa = (x1-x) * (y1-y)
@@ -235,11 +269,20 @@ def bilinear_sampler(img, x, y):
     wc = (x-x0) * (y1-y)
     wd = (x-x0) * (y-y0)
 
+    del x
+    del x0
+    del x1
+    del y
+    del y0
+    del y1
+    gc.collect()
+
     # add dimension for addition
     wa = tf.expand_dims(wa, axis=3)
     wb = tf.expand_dims(wb, axis=3)
     wc = tf.expand_dims(wc, axis=3)
     wd = tf.expand_dims(wd, axis=3)
+    gc.collect()
 
     # compute output
     out = tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])

@@ -268,10 +268,10 @@ def write_image(image, filename, normalize = False, saturate = True, frequency_d
     if saturate:
         image = tf.maximum(0.0, tf.minimum(1.0, image))
     image = promote_to_three_channels(image)
-    image_srgb = tfg.image.color_space.srgb.from_linear_rgb(image) * 255.0  #hmm, correct rounding?
-    image_srgb_int = tf.cast(image_srgb, tf.uint8)
-    image_bytes = tf.image.encode_png(image_srgb_int)
-    tf.io.write_file(filename, image_bytes)
+    image = tfg.image.color_space.srgb.from_linear_rgb(image) * 255.0  #hmm, correct rounding?
+    image = tf.cast(image, tf.uint8)
+    image = tf.image.encode_png(image)
+    tf.io.write_file(filename, image)
 
 def write_sequential_image(image, path, name, sequence_num, extension = 'png', **write_image_args):
     name_with_sequence = "{}_{:08d}.{}".format(name, sequence_num, extension)

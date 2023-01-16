@@ -23,8 +23,9 @@ Those abbreviations mean:
 """
 
 import tensorflow as tf
+import gc
 
-def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=None, inputspace_weights_bhwc = None, supersample = 4, jitter = True, min_weight = 1/1024):
+def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=None, inputspace_weights_bhwc = None, supersample = 4, jitter = True, min_weight = 1/1024, low_memory = False):
     """ Uses the Drizzle algorithm to transform and upscale images.
     
     Args:
@@ -86,19 +87,8 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
                 (More precisely, centers of pixels have inputspace_weights_bhwc, edges of pixels have min_weight, and places fully outside the input image have 0.)
     """
 
-    # just forwarding to avoid tf.function eating the docstring
-    return drizzle_function(input_image_bhwc, theta, upscale, pixfrac, out_shape_hw, inputspace_weights_bhwc, supersample, jitter, min_weight)
-
-@tf.function
-def drizzle_function(input_image_bhwc, theta, upscale, pixfrac, out_shape_hw, inputspace_weights_bhwc, supersample, jitter, min_weight):
-
-    b = tf.shape(input_image_bhwc)[0]
-    in_h = tf.shape(input_image_bhwc)[1]
-    in_w = tf.shape(input_image_bhwc)[2]
+    batches, in_h, in_w, channels = input_image_bhwc.get_shape().as_list()
     
-    # todo: add extra row for easier jacobian stuff
-    theta = tf.reshape(theta, [b, 2, 3])
-
     if out_shape_hw is None:
         out_h = in_h * upscale
         out_w = in_w * upscale
@@ -106,6 +96,38 @@ def drizzle_function(input_image_bhwc, theta, upscale, pixfrac, out_shape_hw, in
         assert(upscale is None)
         out_h = out_shape_hw[0]
         out_w = out_shape_hw[1]
+    
+    if low_memory:
+        gc.collect()
+
+        output_image_bhwc = tf.Variable(tf.zeros(shape = (batches, out_h, out_w, channels)))
+        output_weights_bhwc = tf.Variable(tf.zeros(shape = (batches, out_h, out_w, channels)))
+
+        for b in tf.range(batches):
+            for c in tf.range(channels):
+                for s in tf.range(supersample):
+                    chunk_image_bhwc, chunk_weights_bhwc = drizzle_function(input_image_bhwc[b:b+1, :, :, c:c+1], theta, pixfrac, out_h, out_w, inputspace_weights_bhwc[b:b+1, :, :, c:c+1], 1, jitter, min_weight)
+                    # assign_add doesn't work in eager mode
+                    output_image_bhwc[b:b+1, :, :, c:c+1].assign(output_image_bhwc[b:b+1, :, :, c:c+1] + chunk_image_bhwc)
+                    del chunk_image_bhwc
+                    gc.collect()
+                    output_weights_bhwc[b:b+1, :, :, c:c+1].assign(output_weights_bhwc[b:b+1, :, :, c:c+1] + chunk_weights_bhwc)
+                    del chunk_weights_bhwc
+                    gc.collect()
+                output_image_bhwc[b:b+1, :, :, c:c+1].assign(output_image_bhwc[b:b+1, :, :, c:c+1] / supersample)
+                output_weights_bhwc[b:b+1, :, :, c:c+1].assign(output_weights_bhwc[b:b+1, :, :, c:c+1] / supersample)
+                
+        return output_image_bhwc, output_weights_bhwc
+                
+    else:
+        return drizzle_function(input_image_bhwc, theta, pixfrac, out_h, out_w, inputspace_weights_bhwc, supersample, jitter, min_weight)
+
+@tf.function
+def drizzle_function(input_image_bhwc, theta, pixfrac, out_h, out_w, inputspace_weights_bhwc, supersample, jitter, min_weight):
+
+    b = tf.shape(input_image_bhwc)[0]
+    # todo: add extra row for easier jacobian stuff
+    theta = tf.reshape(theta, [b, 2, 3])
 
     grid_bihw = affine_grid_generator(out_h, out_w, theta)
 
@@ -148,9 +170,12 @@ def get_pixel_value(image_bhwc, xi_coords_bhws, yi_coords_bhws):
     width = shape[2]
     samples = shape[3]
 
-    batch_idx = tf.range(0, batch_size)
+    batch_idx = tf.range(0, batch_size)    
     batch_idx = tf.reshape(batch_idx, (batch_size, 1, 1, 1))
+    gc.collect()
     b = tf.tile(batch_idx, (1, height, width, samples))
+    del batch_idx
+    gc.collect()
 
     indices = tf.stack([b, yi_coords_bhws, xi_coords_bhws], axis = -1)
 
@@ -338,6 +363,7 @@ def drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coord
     pixel_coords_bihws = 0.5 * ((normalized_coords_bihws + 1.0) * tf.cast(size_bihws, 'float32'))
 
     floor_coords_bihws = tf.floor(pixel_coords_bihws)
+ 
 
     int_coords_bihws = tf.cast(floor_coords_bihws, 'int32')
 
@@ -346,36 +372,61 @@ def drizzle_sample_centers(input_bhwc, inputspace_weights_bhwc, normalized_coord
     clipped_int_coords_bihws = tf.clip_by_value(int_coords_bihws, zero, max_bihws)
 
     within_input_bihws = tf.cast(tf.logical_and(tf.greater_equal(int_coords_bihws, zero), tf.greater_equal(max_bihws, int_coords_bihws)), dtype = tf.float32)
+    del int_coords_bihws
+    gc.collect()
 
     within_input_bhws = tf.reduce_prod(within_input_bihws, axis=1)
+    del within_input_bihws
+    gc.collect()
 
     # coordinates within the pixel..
     subpixel_coords_bihws = pixel_coords_bihws - floor_coords_bihws
+    del floor_coords_bihws
+    del pixel_coords_bihws
+    gc.collect()
 
     dist_from_center_bihws = tf.abs(subpixel_coords_bihws - 0.5)
+    del subpixel_coords_bihws
+    gc.collect()
 
     within_pixfrac_bihws = tf.cast(tf.greater(pixfrac * 0.5, dist_from_center_bihws), dtype = tf.float32)
+    del dist_from_center_bihws
+    gc.collect()
 
     within_pixfrac_bhws = tf.reduce_prod(within_pixfrac_bihws, axis=1)
+    del within_pixfrac_bihws
+    gc.collect()
 
     within_pixfrac_bhws = tf.maximum(min_weight, within_pixfrac_bhws)
+    gc.collect()
 
     # geometric meaning 'the weight we get because of the geometry of how the drips map to the output pixels'
     geometric_weight_bhws = within_input_bhws * within_pixfrac_bhws
+    del within_input_bhws
+    del within_pixfrac_bhws
+    gc.collect()
 
     # get_pixel_value() will reduce_mean along the s axis, we must do the same for weights.
     geometric_weight_bhw = tf.reduce_mean(geometric_weight_bhws, axis = -1)
+    del geometric_weight_bhws
+    gc.collect()
     
     # same weights for all channels... hmm... makes me think of cool debayering stuff that could be done...
     geometric_weight_bhwc = tf.expand_dims(geometric_weight_bhw, axis = 3)
+    del geometric_weight_bhw
+    gc.collect()
     
     pixel_values_bhwc = get_pixel_value(input_bhwc, clipped_int_coords_bihws[:, 0, :, :, :], clipped_int_coords_bihws[:, 1, :, :, :])    
 
     # it's necessary to push the weights lookup all the way down here, rather than a seperate pass, so we use the same jitter values.
 
     output_weight_bhwc = geometric_weight_bhwc
+    del geometric_weight_bhwc
+
     if inputspace_weights_bhwc is not None:
         inputspace_weight_values_bhwc = get_pixel_value(inputspace_weights_bhwc, clipped_int_coords_bihws[:, 0, :, :, :], clipped_int_coords_bihws[:, 1, :, :, :])
         output_weight_bhwc *= inputspace_weight_values_bhwc
+        del inputspace_weight_values_bhwc
+        gc.collect()
 
     return pixel_values_bhwc, output_weight_bhwc

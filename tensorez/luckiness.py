@@ -140,7 +140,7 @@ class LuckinessAlgorithmFrequencyBands:
         new_info_lowpass_chw = apply_frequency_mask(new_info_chw, isoplanatic_patch_frequency_mask)
         wrong_info_lowpass_chw = apply_frequency_mask(wrong_info_chw, isoplanatic_patch_frequency_mask)
 
-        lowpass_luckiness_chw = tf.sqrt(new_info_lowpass_chw / (wrong_info_lowpass_chw + epsilon))
+        lowpass_luckiness_chw = tf.sqrt(tf.math.divide_no_nan(new_info_lowpass_chw, (wrong_info_lowpass_chw + epsilon)))
 
         debug_images = {}
         if want_debug_images:
