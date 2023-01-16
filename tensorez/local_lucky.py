@@ -55,6 +55,18 @@ def local_lucky(
     bayer = True,
     low_memory = False
 ):
+    tensorez_steps = lights.tensorez_steps
+    tensorez_steps += 'Running local_lucky() with:\n'
+    tensorez_steps += f'\talgorithm={algorithm}\n'
+    tensorez_steps += f'\talgorithm_kwargs={algorithm_kwargs}\n'
+    tensorez_steps += f'\tsteepness={steepness}\n'
+    tensorez_steps += f'\tstdevs_above_mean={stdevs_above_mean}\n'
+    tensorez_steps += f'\tdrizzle={drizzle}\n'
+    if drizzle:
+        tensorez_steps += f'\tdrizzle_kwargs={drizzle_kwargs}\n'
+    tensorez_steps += f'\tbayer={bayer}\n'
+    print(tensorez_steps)
+
     shape = hwc_to_chw(lights[0]).shape
 
     algorithm_cache = algorithm.create_cache(shape, lights, average_image, debug_output_dir, debug_frames, **algorithm_kwargs)
@@ -62,13 +74,17 @@ def local_lucky(
     luckiness_mean, luckiness_stdev = pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_output_dir, debug_frames)
 
     weighted_avg = pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, algorithm_kwargs, stdevs_above_mean, steepness, debug_output_dir, debug_frames, drizzle, drizzle_kwargs, bayer, low_memory)
+    del luckiness_mean
+    del luckiness_stdev
+    del algorithm_cache
+    gc.collect()
 
-    return chw_to_hwc(weighted_avg)
+    weighted_avg = chw_to_hwc(weighted_avg)
+    gc.collect()
 
+    weighted_avg.tensorez_steps = tensorez_steps
 
-
-
-
+    return weighted_avg
 
 def pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_output_dir, debug_frames):
     luckiness_variance_state = welfords_init(shape)
@@ -188,9 +204,11 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
 
     weighted_avg.assign(tf.math.divide_no_nan(weighted_avg, total_weight))
     if debug_output_dir is not None:
-        avg_num_frames = tf.reduce_mean(total_weight)
+        avg_num_frames = tf.reduce_mean(total_weight).numpy()
         if math.isnan(avg_num_frames):
             avg_num_frames = 'nan'
+        else:
+            avg_num_frames = round(avg_num_frames)
         write_image(chw_to_hwc(weighted_avg), os.path.join(debug_output_dir, f"local_lucky_{stdevs_above_mean}_stdevs_{steepness}_steepness_{avg_num_frames}_of_{len(lights)}.png"))
         write_image(chw_to_hwc(total_weight), os.path.join(debug_output_dir, "total_weight.png"), normalize = True)
 

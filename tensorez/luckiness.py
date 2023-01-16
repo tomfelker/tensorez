@@ -73,7 +73,7 @@ class LuckinessAlgorithmFrequencyBands:
 
     
     '''
-    def create_cache(shape_chw, lights, average_image, debug_output_dir, debug_frames, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels, misalignment_penalty_factor = 5):
+    def create_cache(shape_chw, lights, average_image, debug_output_dir, debug_frames, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels, channel_crosstalk = 0):
 
         isoplanatic_patch_frequency_mask = get_gaussian_lowpass_frequency_mask(shape_chw, isoplanatic_patch_pixels)
         known_frequency_mask = get_gaussian_bandpass_frequency_mask(shape_chw, crossover_wavelength_pixels, isoplanatic_patch_pixels)
@@ -85,7 +85,7 @@ class LuckinessAlgorithmFrequencyBands:
             average_image_chw = hwc_to_chw(average_image)
         else:
             image_variance_state = welfords_init(shape_chw)
-            frequency_mag_variance_state = welfords_init(shape_chw)
+            frequency_mag_variance_state = None
             
             for image_index, image in enumerate(lights):
                 print(f"Averaging image {image_index + 1} of {len(lights)}")
@@ -95,6 +95,8 @@ class LuckinessAlgorithmFrequencyBands:
 
                 frequency = spatial_to_frequency_domain(image)
                 frequency_mag = tf.abs(frequency)
+                if frequency_mag_variance_state is None:
+                    frequency_mag_variance_state = welfords_init(frequency_mag.shape)
                 frequency_mag_variance_state = welfords_update(frequency_mag_variance_state, frequency_mag)
 
 
@@ -125,7 +127,7 @@ class LuckinessAlgorithmFrequencyBands:
         return cache
 
     @tf.function
-    def compute_luckiness(image_chw, cache, want_debug_images, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels, epsilon = 1.0 / (1 << 16)):
+    def compute_luckiness(image_chw, cache, want_debug_images, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels, channel_crosstalk = 0, epsilon = 1.0 / (1 << 16)):
         isoplanatic_patch_frequency_mask = cache['isoplanatic_patch_frequency_mask']
         known_frequency_mask = cache['known_frequency_mask']
         interesting_frequency_mask = cache['interesting_frequency_mask']
@@ -140,7 +142,9 @@ class LuckinessAlgorithmFrequencyBands:
         new_info_lowpass_chw = apply_frequency_mask(new_info_chw, isoplanatic_patch_frequency_mask)
         wrong_info_lowpass_chw = apply_frequency_mask(wrong_info_chw, isoplanatic_patch_frequency_mask)
 
-        lowpass_luckiness_chw = tf.sqrt(tf.math.divide_no_nan(new_info_lowpass_chw, (wrong_info_lowpass_chw + epsilon)))
+        lowpass_luckiness_chw = tf.sqrt(tf.maximum(0.0, tf.math.divide_no_nan(new_info_lowpass_chw, (wrong_info_lowpass_chw + epsilon))))
+        
+        lowpass_luckiness_chw = apply_channel_crosstalk(lowpass_luckiness_chw, channel_crosstalk)
 
         debug_images = {}
         if want_debug_images:
@@ -197,18 +201,21 @@ class LuckinessAlgorithmLowpassAbsBandpass:
         edgey_image = tf.abs(highpass_image)
 
         luckiness = apply_frequency_mask(edgey_image, known_frequency_mask)
+
         return luckiness
 
 
 
 
 def spatial_to_frequency_domain(spatial_domain_image_chw):
-    spatial_domain_image_chw_complex = tf.cast(spatial_domain_image_chw, dtype = tf.complex64)
-    frequency_domain_image_chw_complex = tf.signal.fft2d(spatial_domain_image_chw_complex)
+    # even sizes please, or else we'd have to keep track of dimension when going the other way
+    assert(spatial_domain_image_chw.shape[-1] % 2 == 0)
+
+    frequency_domain_image_chw_complex = tf.signal.rfft2d(spatial_domain_image_chw)
     return frequency_domain_image_chw_complex
 
 def frequency_to_spatial_domain(frequency_domain_image_chw):
-    spatial_domain_image_chw_complex = tf.signal.ifft2d(frequency_domain_image_chw)
+    spatial_domain_image_chw_complex = tf.signal.irfft2d(frequency_domain_image_chw)
     spatial_domain_image_chw = tf.math.real(spatial_domain_image_chw_complex)
     return spatial_domain_image_chw
 
@@ -290,6 +297,8 @@ def fft_spatial_frequencies_per_pixel(shape_chw):
     w = shape_chw[-1]
     h = shape_chw[-2]
     freqs_x = tf.convert_to_tensor(np.fft.fftfreq(w), dtype = tf.float32)
+    # because irfft2d
+    freqs_x = freqs_x[0 : (freqs_x.shape[0] // 2) + 1]
     freqs_y = tf.convert_to_tensor(np.fft.fftfreq(h), dtype = tf.float32)
     freqs_x = tf.expand_dims(freqs_x, axis = [-2])
     freqs_y = tf.expand_dims(freqs_y, axis = [-1])
@@ -338,3 +347,14 @@ def bincount_along_axis(bins, weights, length, axis):
     # everything will have been flattened
     stacked = tf.stack(bincounts)
     return stacked
+
+def apply_channel_crosstalk(image_bchw, channel_crosstalk):
+    if image_bchw.shape[1] == 1:
+        return image_bchw
+    if channel_crosstalk == 0:
+        return image_bchw
+    if channel_crosstalk == 1:
+        return tf.reduce_min(image_bchw, axis=(1), keepdims=True)
+    return image_bchw * (1.0 - channel_crosstalk) + channel_crosstalk * tf.reduce_min(image_bchw, axis=(1), keepdims=True)
+    
+

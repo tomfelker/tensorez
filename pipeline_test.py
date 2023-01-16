@@ -34,10 +34,16 @@ observation = Observation(
 #)
 
 #observation = Observation(
-#   lights = ImageSequence(os.path.join('data', '2021-10-15_saturn_prime_crop', 'lights', '*.SER')),
+#    lights = ImageSequence(os.path.join('data', '2021-10-15_saturn_prime_crop', 'lights', '*.SER')),
 #    darks = ImageSequence(os.path.join('data', '2021-10-15_saturn_prime_crop', 'darks', '*.SER')),
+#  
 #    align_by_center_of_mass=True,
-#    crop=(512, 512)
+#    align_by_center_of_mass_only_even_shifts=True,
+#    crop=(512, 512),
+#    crop_align=2,
+#    crop_before_content_align=True,
+#    align_by_content=True,
+#    compute_alignment_transforms_kwargs={'allow_rotation': False, 'allow_scale': False, 'allow_skew': False}
 #)
 
 #observation = Observation(
@@ -90,7 +96,7 @@ if debug_alignment and observation.align_by_content:
 
 
 #tf.config.run_functions_eagerly(True)
-observation.debug_frame_limit = 20
+#observation.debug_frame_limit = 10
 
 # more steps doesn't seem to make any difference
 steps = 1
@@ -109,7 +115,12 @@ for step in range(steps):
         #algorithm_kwargs = {'noise_wavelength_pixels': 15, 'crossover_wavelength_pixels': 45},
 
         algorithm=LuckinessAlgorithmFrequencyBands,
-        algorithm_kwargs=dict(noise_wavelength_pixels=5, crossover_wavelength_pixels=10, isoplanatic_patch_pixels=10),
+        algorithm_kwargs=dict(
+            noise_wavelength_pixels=15,
+            crossover_wavelength_pixels=25,
+            isoplanatic_patch_pixels=25,
+            channel_crosstalk = 1,
+            ),
 
         #algorithm = LuckinessAlgorithmImageTimesKnown,
         #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
@@ -121,7 +132,7 @@ for step in range(steps):
         steepness=3,
         debug_output_dir=step_output_dir,    
         bayer=True,
-        drizzle=True,
+        drizzle=False,
         drizzle_kwargs={'upscale': 3, 'supersample': 4},
         average_image=known_image,
         low_memory=True

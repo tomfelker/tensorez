@@ -6,7 +6,7 @@ import os.path
 import numpy as np
 
 class Observation:
-    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 1, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}, align_by_center_of_mass_only_even_shifts = False):
+    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 2, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}, align_by_center_of_mass_only_even_shifts = False):
         self.lights = lights
         self.darks = darks
         self.align_by_center_of_mass = align_by_center_of_mass
@@ -24,6 +24,20 @@ class Observation:
         self.debug_frame_limit = None
 
         self.computing_alignment_transforms = False
+
+        # this should be all things that might affect the result, for use in logs and such so we can recreate things
+        self.tensorez_steps = 'Observation with:\n'
+        self.tensorez_steps += f'\tlights: {self.lights.get_cache_hash_info()}\n'
+        if self.darks is not None:
+            self.tensorez_steps += f'\tdarks: {self.darks.get_cache_hash_info()}\n'
+        self.tensorez_steps += f'\talign_by_center_of_mass: {self.align_by_center_of_mass}\n'
+        self.tensorez_steps += f'\talign_by_content: {self.align_by_content}\n'
+        self.tensorez_steps += f'\tcompute_alignment_transforms_kwargs: {self.compute_alignment_transforms_kwargs}\n'
+        self.tensorez_steps += f'\tcrop: {self.crop}\n'
+        self.tensorez_steps += f'\tcrop_align: {self.crop_align}\n'
+        self.tensorez_steps += f'\tcrop_before_align: {self.crop_before_align}\n'
+        self.tensorez_steps += f'\tcrop_before_content_align: {self.crop_before_content_align}\n'
+        self.tensorez_steps += f'\talign_by_center_of_mass_only_even_shifts: {align_by_center_of_mass_only_even_shifts}\n'
 
     def load_or_create_dark_image(self):
         if self.dark_image is not None:
@@ -70,6 +84,7 @@ class Observation:
         if self.computing_alignment_transforms is True:
             return
 
+        # this should be only those things that  might affect the alignment transforms we compute (so not the same as tensorez_steps)
         lights_info = 'Lights:\n' + self.lights.get_cache_hash_info()
         hash_info = lights_info.replace('\n', '\n\t') + "\n"
         if self.darks is not None:
@@ -145,8 +160,10 @@ class Observation:
     def read_bayer_filter_unaligned(self):
         bayer_filter = self.lights.read_bayer_filter()
         if self.align_by_center_of_mass:
-            assert(self.align_by_center_of_mass_only_even_shifts)
+            assert(self.align_by_center_of_mass_only_even_shifts, 'When doing Bayer processing, you must set align_by_center_of_mass_only_even_shifts, so that the bayer patterns of all images will line up.  You may also want to align_by_content in this case.')
         if self.crop is not None:
+            # This may not be strictly necessary, but it keeps things simple... otherwise if we decompose
+            # the image into bayer channels, different crops would have different bayer patterns.
             assert(self.crop_align == 2)
             bayer_filter = crop_image(bayer_filter, crop=self.crop, crop_align=self.crop_align)
         return bayer_filter
