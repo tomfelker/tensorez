@@ -13,6 +13,7 @@ data/**/*.ser.txt
 data/**/*.fit
 data/**/*.txt
 data/**/*.npy
+data/**/*.npz
 gallery/**
 obd/**
 output/*
