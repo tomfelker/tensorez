@@ -46,6 +46,7 @@ def local_lucky(
     algorithm,
     algorithm_kwargs,
     average_image = None,
+    dark_variance = None,
     steepness = 3,
     stdevs_above_mean = 3,
     debug_output_dir = None,
@@ -93,15 +94,18 @@ def pass_1(shape, lights, algorithm, algorithm_cache, algorithm_kwargs, debug_ou
         image_avg = tf.Variable(tf.zeros(shape))
 
     # first pass
-    for image_index, image in enumerate(lights):
+    for image_index in range(len(lights)):
+        image, dark_variance = lights.read_cooked_image(image_index, want_dark_variance=True)
         image = hwc_to_chw(image)
+        if dark_variance is not None:
+            dark_variance = hwc_to_chw(dark_variance)
 
         if debug_output_dir is not None:
             image_avg.assign_add(image)
 
         want_debug_images = (debug_output_dir is not None and image_index < debug_frames)
 
-        luckiness, debug_images = algorithm.compute_luckiness(image, algorithm_cache, want_debug_images, **algorithm_kwargs)
+        luckiness, debug_images = algorithm.compute_luckiness(image, dark_variance, algorithm_cache, want_debug_images, **algorithm_kwargs)
 
         if want_debug_images:
             write_image(chw_to_hwc(luckiness), os.path.join(debug_output_dir, "luckiness_{:08d}.png".format(image_index)), normalize = True)
@@ -132,10 +136,13 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
 
     total_weight = None
     weighted_avg = None
-    for image_index, image in enumerate(lights):
+    for image_index in range(len(lights)):
+        image, dark_variance = lights.read_cooked_image(image_index, want_dark_variance=True)
         image = hwc_to_chw(image)
+        if dark_variance is not None:
+            dark_variance = hwc_to_chw(dark_variance)
 
-        luckiness, debug_images = algorithm.compute_luckiness(image, algorithm_cache, want_debug_images = False, **algorithm_kwargs)
+        luckiness, debug_images = algorithm.compute_luckiness(image, dark_variance, algorithm_cache, want_debug_images = False, **algorithm_kwargs)
 
         luckiness_zero_mean_unit_variance = tf.math.divide_no_nan(luckiness - luckiness_mean, luckiness_stdev)
 

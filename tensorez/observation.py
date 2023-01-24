@@ -4,6 +4,7 @@ import tensorflow as tf
 import hashlib
 import os.path
 import numpy as np
+import gc
 
 class Observation:
     def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 2, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}, align_by_center_of_mass_only_even_shifts = False):
@@ -52,25 +53,38 @@ class Observation:
                 hash_info = self.darks.get_cache_hash_info()
                 hash = hashlib.sha256(repr(hash_info).encode('utf-8')).hexdigest()
                 basename = 'tensorez_dark_cache_' + hash
-                basename_npy = basename + '.npy'
+                basename_npy = basename + '.npz'
                 basename_txt = basename + '.txt'
-                dark_cache_npy_filename = os.path.join(dir, basename_npy)
+                dark_cache_npz_filename = os.path.join(dir, basename_npy)
                 dark_cache_txt_filename = os.path.join(dir, basename_txt)
 
-            if dark_cache_npy_filename is not None:
+            if dark_cache_npz_filename is not None:
                 try:                    
-                    self.dark_image = np.load(dark_cache_npy_filename)
-                    print(f"Loaded dark image from '{dark_cache_npy_filename}'.")
+                    dark_dict = np.load(dark_cache_npz_filename)
+                    self.dark_image = dark_dict['dark_image']
+                    self.dark_variance = dark_dict['dark_variance']
+                    print(f"Loaded dark image from '{dark_cache_npz_filename}'.")
                     return
                 except FileNotFoundError:
-                    print(f"Dark image cache wasn't found.  (Wanted '{dark_cache_npy_filename}')")
+                    print(f"Dark image cache wasn't found.  (Wanted '{dark_cache_npz_filename}')")
 
             print("Computing the average of the darks.")
-            self.dark_image = self.darks.read_average_image()
+            
+            dark_variance_state = None
+            for dark_frame_index, dark_frame in enumerate(self.darks):
+                print(f'Averaging dark frame {dark_frame_index+1} of len(self.darks)')
+                if dark_variance_state is None:
+                    dark_variance_state = welfords_init(dark_frame.shape)
+                dark_variance_state = welfords_update(dark_variance_state, dark_frame)                
+            self.dark_image = welfords_get_mean(dark_variance_state)
+            self.dark_variance = welfords_get_variance(dark_variance_state)
+            del dark_variance_state
+            gc.collect()
+            # stdev can be inferred from that, if needed
 
-            if dark_cache_npy_filename is not None:
-                print(f"Saving dark image cache to {dark_cache_npy_filename}")
-                np.save(dark_cache_npy_filename, self.dark_image)
+            if dark_cache_npz_filename is not None:
+                print(f"Saving dark image cache to {dark_cache_npz_filename}")
+                np.savez_compressed(dark_cache_npz_filename, dark_image=self.dark_image, dark_variance=self.dark_variance)
                 with open(dark_cache_txt_filename, mode='w') as txtfile:
                     txtfile.write(hash_info)
 
@@ -128,33 +142,51 @@ class Observation:
             txtfile.write(hash_info)
 
 
-    def read_cooked_image(self, index, skip_content_align = False):
+    def read_cooked_image(self, index, skip_content_align = False, want_dark_variance = False):
 
         self.load_or_create_dark_image()
         self.load_or_create_alignment_transforms()
 
         image = self.lights.read_image(index)
+
+        if want_dark_variance:
+            dark_variance = self.dark_variance
+        else:
+            dark_variance = None
         
         if self.dark_image is not None:
             image -= self.dark_image
 
         if self.crop_before_align and self.crop is not None:
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
+            if dark_variance is not None:
+                dark_variance = crop_image(dark_variance, crop=self.crop, crop_align=self.crop_align)
 
         if self.align_by_center_of_mass:
-            image = align_by_center_of_mass(image, only_even_shifts = self.align_by_center_of_mass_only_even_shifts)
+            if dark_variance is None:
+                image, align_by_center_of_mass(image, only_even_shifts = self.align_by_center_of_mass_only_even_shifts)
+            else:
+                image, dark_variance = align_by_center_of_mass(image, only_even_shifts = self.align_by_center_of_mass_only_even_shifts, also_align_hwc=dark_variance)
 
         if self.crop_before_content_align and self.crop is not None:
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
+            if dark_variance is not None:
+                dark_variance = crop_image(dark_variance, crop=self.crop, crop_align=self.crop_align)
 
         if self.alignment_transforms is not None and not skip_content_align:
             image = align.transform_image(image, self.alignment_transforms[index])
+            if dark_variance is not None:
+                dark_variance = align.transform_image(dark_variance, self.alignment_transforms[index])
 
         # sigh, this is getting ugly...
         if not self.crop_before_align and not self.crop_before_content_align and self.crop is not None:
             assert(not skip_content_align)
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
+            if dark_variance is not None:
+                dark_variance = crop_image(dark_variance, crop=self.crop, crop_align=self.crop_align)
 
+        if want_dark_variance:
+            return image, dark_variance
         return image
 
     def read_bayer_filter_unaligned(self):

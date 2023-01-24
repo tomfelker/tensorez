@@ -14,12 +14,12 @@ from tensorez.align import *
 
 import matplotlib.pyplot as plt
 
-observation = Observation(
-    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step = 1),
-    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER')),
-    align_by_content=True,
-    #compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
-)
+#observation = Observation(
+#    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step = 1),
+#    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER')),
+#    align_by_content=True,
+#    #compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
+#)
 
 #observation = Observation(
 #    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER')),
@@ -33,18 +33,18 @@ observation = Observation(
 #    compute_alignment_transforms_kwargs={'allow_rotation': False, 'allow_scale': False, 'allow_skew': False}
 #)
 
-#observation = Observation(
-#    lights = ImageSequence(os.path.join('data', '2021-10-15_saturn_prime_crop', 'lights', '*.SER')),
-#    darks = ImageSequence(os.path.join('data', '2021-10-15_saturn_prime_crop', 'darks', '*.SER')),
-#  
-#    align_by_center_of_mass=True,
-#    align_by_center_of_mass_only_even_shifts=True,
-#    crop=(512, 512),
-#    crop_align=2,
-#    crop_before_content_align=True,
-#    align_by_content=True,
-#    compute_alignment_transforms_kwargs={'allow_rotation': False, 'allow_scale': False, 'allow_skew': False}
-#)
+observation = Observation(
+    lights = ImageSequence(os.path.join('data', '2021-10-15_saturn_prime_crop', 'lights', '*.SER')),
+    darks = ImageSequence(os.path.join('data', '2021-10-15_saturn_prime_crop', 'darks', '*.SER')),
+  
+    align_by_center_of_mass=True,
+    align_by_center_of_mass_only_even_shifts=True,
+    crop=(512, 512),
+    crop_align=2,
+    crop_before_content_align=True,
+    align_by_content=True,
+    compute_alignment_transforms_kwargs={'allow_rotation': False, 'allow_scale': False, 'allow_skew': False}
+)
 
 #observation = Observation(
 #   lights = ImageSequence(os.path.join('data', '2021-10-15_jupiter_prime', 'jupiter_1.light.SER')),
@@ -96,7 +96,7 @@ if debug_alignment and observation.align_by_content:
 
 
 #tf.config.run_functions_eagerly(True)
-#observation.debug_frame_limit = 10
+#observation.debug_frame_limit = 100
 
 # more steps doesn't seem to make any difference
 steps = 1
@@ -117,9 +117,9 @@ for step in range(steps):
         algorithm=LuckinessAlgorithmFrequencyBands,
         algorithm_kwargs=dict(
             noise_wavelength_pixels=15,
-            crossover_wavelength_pixels=25,
-            isoplanatic_patch_pixels=25,
-            channel_crosstalk = 1,
+            crossover_wavelength_pixels=35,
+            isoplanatic_patch_pixels=35,
+            channel_crosstalk = 0,
             ),
 
         #algorithm = LuckinessAlgorithmImageTimesKnown,

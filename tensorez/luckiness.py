@@ -10,7 +10,7 @@ class LuckinessAlgorithmImageSquared:
         return cache
 
     @tf.function
-    def compute_luckiness(image_chw, cache, want_debug_images, isoplanatic_patch_pixels):
+    def compute_luckiness(image_chw, dark_variance_chw, cache, want_debug_images, isoplanatic_patch_pixels):
         isoplanatic_patch_frequency_mask = cache['isoplanatic_patch_frequency_mask']
 
         #image_chw -= tf.reduce_mean(image_chw, axis = [-2, -1], keepdims=True)
@@ -53,7 +53,7 @@ class LuckinessAlgorithmImageTimesKnown:
         return cache
 
     @tf.function
-    def compute_luckiness(image_chw, cache, want_debug_images, isoplanatic_patch_pixels):
+    def compute_luckiness(image_chw, dark_variance_chw, cache, want_debug_images, isoplanatic_patch_pixels):
         known_image_chw = cache['known_image_chw']
         lowpass_known_image_chw = cache['lowpass_known_image_chw']
         isoplanatic_patch_frequency_mask = cache['isoplanatic_patch_frequency_mask']
@@ -107,7 +107,7 @@ class LuckinessAlgorithmFrequencyBands:
                 output_frequency_histograms(debug_output_dir, frequency_mag_variance_state, known_frequency_mask, interesting_frequency_mask)
 
         average_image_known_chw = apply_frequency_mask(average_image_chw, known_frequency_mask)
-        
+                
         if debug_output_dir is not None:
             write_image(chw_to_hwc(average_image_chw), os.path.join(debug_output_dir, 'average_image.png'))
             write_image(chw_to_hwc(average_image_known_chw), os.path.join(debug_output_dir, 'average_image_known_chw.png'))
@@ -127,7 +127,7 @@ class LuckinessAlgorithmFrequencyBands:
         return cache
 
     @tf.function
-    def compute_luckiness(image_chw, cache, want_debug_images, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels, channel_crosstalk = 0, epsilon = 1.0 / (1 << 16)):
+    def compute_luckiness(image_chw, dark_variance_chw, cache, want_debug_images, isoplanatic_patch_pixels, crossover_wavelength_pixels, noise_wavelength_pixels, channel_crosstalk = 0, epsilon = 1.0 / (1 << 16)):
         isoplanatic_patch_frequency_mask = cache['isoplanatic_patch_frequency_mask']
         known_frequency_mask = cache['known_frequency_mask']
         interesting_frequency_mask = cache['interesting_frequency_mask']
@@ -138,6 +138,10 @@ class LuckinessAlgorithmFrequencyBands:
         
         new_info_chw = tf.square(this_image_interesting_chw)
         wrong_info_chw = tf.square(this_image_known_chw - average_image_known_chw)
+
+        if dark_variance_chw is not None:
+            new_info_chw -= dark_variance_chw
+            #wrong_info_chw += dark_variance_chw
 
         new_info_lowpass_chw = apply_frequency_mask(new_info_chw, isoplanatic_patch_frequency_mask)
         wrong_info_lowpass_chw = apply_frequency_mask(wrong_info_chw, isoplanatic_patch_frequency_mask)
@@ -186,7 +190,7 @@ class LuckinessAlgorithmLowpassAbsBandpass:
         return cache
 
     @tf.function
-    def compute_luckiness(image_chw, cache, want_debug_images, crossover_wavelength_pixels, noise_wavelength_pixels):
+    def compute_luckiness(image_chw, dark_variance_chw, cache, want_debug_images, crossover_wavelength_pixels, noise_wavelength_pixels):
         known_frequency_mask = cache['known_frequency_mask']
         interesting_frequency_mask = cache['interesting_frequency_mask']
 
