@@ -209,6 +209,23 @@ class LuckinessAlgorithmLowpassAbsBandpass:
         return luckiness
 
 
+class LuckinessAlgorithmFourierFocus:
+    def create_cache(shape, lights, average_image, debug_output_dir, debug_frames, crossover_wavelength_pixels, noise_wavelength_pixels):
+        interesting_frequency_mask = get_gaussian_bandpass_frequency_mask(shape, noise_wavelength_pixels, crossover_wavelength_pixels)
+        if debug_output_dir is not None:
+            write_image(chw_to_hwc(interesting_frequency_mask), os.path.join(debug_output_dir, 'interesting_frequencies.png'))
+
+        cache = {}
+        cache['interesting_frequency_mask'] = interesting_frequency_mask
+        return cache
+
+    @tf.function
+    def compute_luckiness(image_chw, dark_variance_chw, cache, want_debug_images, crossover_wavelength_pixels, noise_wavelength_pixels):
+        interesting_frequency_mask = cache['interesting_frequency_mask']
+
+        luckiness = tf.reduce_mean(tf.abs(spatial_to_frequency_domain(image_chw)) * interesting_frequency_mask)
+        
+        return luckiness
 
 
 def spatial_to_frequency_domain(spatial_domain_image_chw):
