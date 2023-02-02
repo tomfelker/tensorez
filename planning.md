@@ -4,6 +4,14 @@ To do good moon or extended object lucky imaging, need local alignment.
     - started doing this in local_align.py
     - would still want to cache (as it's slow), but not in one big array (as it wouldn't fit in memory)
         - so need to set up some per-frame caching thing (heh, and buy an SSD)
+            - haha okay, SSD purchased...
+    - potential problem: both STN and my drizzle code are "backward" - we specify, for each pixel in the output image, which pixel from the input image it should come from.  (Also, I dunno if drizzle is actually differentiable, probably not unless you use supersampling.)  But that doesn't reflect what's actually happening: several parts of the input image (the moon) could get diffracted by the atmosphere so that they fall on one part of the output image (the camera sensor)... something something zero-determinant non-invertable jacobian.  So using STN would only work in cases where the distortion is not so extreme that there are "folds" like that.  (Also, in this case we would want the intensity to change - the folds should be bright lines.
+        - "Splat" might solve this:
+            - https://github.com/tensorflow/graphics/blob/master/tensorflow_graphics/rendering/splat.py
+            - https://openaccess.thecvf.com/content/ICCV2021/papers/Cole_Differentiable_Surface_Rendering_via_Non-Differentiable_Sampling_ICCV_2021_paper.pdf
+            - https://ieeexplore.ieee.org/document/9157557
+            - These are trying to do video frame extrapolation from motion vectors, or even 3d rendering, differentiably.  Since both of those depend on scatter (i.e., rasterize a triangle and push its color into the output buffer), it's not differentiable.  But in the same way that STN wouldn't work without bilinear sampling, the idea seems to be that instead of just scattering into one pixel, you 'splat' by writing a whole 3x3 kernel, with the kernel center being a function of the input pixel coordinate.  (There's an interesting idea where you recompute the kernel each time, even though you know it's centered at 0,0, so that the derivatives can flow.  The derivatives must flow!)
+            - This is actutally kind of similar to drizzle as it's commonly written, just with a cooler kernel.
 
 ## Drizzle:
 - there is existing ancient C code (astropy.drizzle -> drizzlepac)

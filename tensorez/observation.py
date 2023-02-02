@@ -72,7 +72,7 @@ class Observation:
             
             dark_variance_state = None
             for dark_frame_index, dark_frame in enumerate(self.darks):
-                print(f'Averaging dark frame {dark_frame_index+1} of len(self.darks)')
+                print(f'Averaging dark frame {dark_frame_index+1} of {len(self.darks)}')
                 if dark_variance_state is None:
                     dark_variance_state = welfords_init(dark_frame.shape)
                 dark_variance_state = welfords_update(dark_variance_state, dark_frame)                

@@ -8,7 +8,7 @@
 import tensorflow as tf
 import gc
 
-def spatial_transformer_network(input_fmap, theta, out_dims=None, low_memory=False):
+def spatial_transformer_network(input_fmap, theta, out_dims=None, low_memory=False, flow = None):
     """
     Spatial Transformer Network layer implementation as described in [1].
 
@@ -34,6 +34,10 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, low_memory=Fal
     - theta: affine transform tensor of shape (B, 6). Permits cropping,
       translation and isotropic scaling. Initialize to identity matrix.
       It is the output of the localization network.
+
+    - flow: tensor of shape  (B, I, H, W), where I is the index of a
+      coordinate (0 for x, 1 for y), and the value is how much we should
+      perturb the input sample position (in addition to theta)
 
     Returns
     -------
@@ -65,7 +69,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, low_memory=Fal
 
         for b in tf.range(B):
             for c in tf.range(C):
-                chunk_fmap = spatial_transformer_network_function(input_fmap[b:b+1, :, :, c:c+1], theta, out_H, out_W)
+                chunk_fmap = spatial_transformer_network_function(input_fmap[b:b+1, :, :, c:c+1], theta, out_H, out_W, flow)
                 # assign_add doesn't work in eager mode
                 output_fmap[b:b+1, :, :, c:c+1].assign(output_fmap[b:b+1, :, :, c:c+1] + chunk_fmap)
                 del chunk_fmap
@@ -74,17 +78,20 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, low_memory=Fal
         return output_fmap
 
     else:
-        return spatial_transformer_network_function(input_fmap, theta, out_H, out_W)    
+        return spatial_transformer_network_function(input_fmap, theta, out_H, out_W, flow)    
 
 
 @tf.function
-def spatial_transformer_network_function(input_fmap, theta, out_H, out_W):
+def spatial_transformer_network_function(input_fmap, theta, out_H, out_W, flow):
 
     B = tf.shape(input_fmap)[0]
 
     theta = tf.reshape(theta, [B, 2, 3])
 
     batch_grids = affine_grid_generator(out_H, out_W, theta)
+
+    if flow is not None:
+      batch_grids += flow
     
     x_s = batch_grids[:, 0, :, :]
     y_s = batch_grids[:, 1, :, :]

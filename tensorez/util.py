@@ -530,3 +530,92 @@ def welfords_get_variance(existingAggregate):
 def welfords_get_stdev(existingAggregate):
     (count, mean, M2) = existingAggregate
     return tf.sqrt(M2 / count)
+
+
+def middle_out(start_index, count):
+    for index in range(start_index + 1, count):
+        yield index, index - 1
+    for index in range(start_index - 1, -1, -1):
+        yield index, index + 1
+
+
+def generate_mask_image(shape_bhwc, **kwargs):
+    mask_image_w = generate_mask_image_1d(shape_bhwc[-2], **kwargs)
+    mask_image_h = generate_mask_image_1d(shape_bhwc[-3], **kwargs)
+
+    mask_image_b_wc = tf.reshape(mask_image_w, (1, 1, shape_bhwc[-2], 1))
+    mask_image_bh_c = tf.reshape(mask_image_h, (1, shape_bhwc[-3], 1, 1))
+
+    mask_image_bhwc = tf.multiply(mask_image_b_wc, mask_image_bh_c)
+
+    return mask_image_bhwc
+
+
+def generate_mask_image_1d(size, border_fraction = .1, ramp_fraction = .1, dtype = tf.float32):
+
+    mask_image_1d = tf.linspace(0.0, 1.0 / ramp_fraction, size)
+    mask_image_1d = tf.minimum(mask_image_1d, 1.0 / ramp_fraction - mask_image_1d)
+    mask_image_1d = tf.clip_by_value(mask_image_1d - border_fraction / ramp_fraction, 0, 1)
+    mask_image_1d = tf.cast(mask_image_1d, dtype)
+
+    return mask_image_1d
+
+
+def alignment_transform_to_stn_theta(alignment_transform):
+    """ convert an alignment transform in terms of shift, rotate, scale, and skew into to the style required by STN
+    Arguments:
+        alignment_transform is [dx, dy, theta, log(sx), log(sy), skew]    
+    """
+    delta_x = alignment_transform[0]
+    delta_y = alignment_transform[1]
+    theta_radians = alignment_transform[2]
+    if alignment_transform.shape[-1] == 6:
+        sx = tf.exp(alignment_transform[3])
+        sy = tf.exp(alignment_transform[4])
+        skew_x = alignment_transform[5]
+    else:
+        sx = 1.0
+        sy = 1.0
+        skew_x = 0.0
+
+    translation = tf.reshape(
+        tf.stack([
+            1.0, 0.0, delta_x,
+            0.0, 1.0, delta_y,
+            0.0, 0.0, 1.0
+        ]),
+        (3, 3)
+    )
+
+    rotation = tf.reshape(        
+        tf.stack([
+            tf.cos(theta_radians), -tf.sin(theta_radians), 0,
+            tf.sin(theta_radians), tf.cos(theta_radians), 0,
+            0.0, 0.0, 1.0
+        ]),
+        (3, 3)
+    )
+
+    scale = tf.reshape(
+        tf.stack([
+            sx, 0.0, 0.0,
+            0.0, sy, 0.0,
+            0.0, 0.0, 1.0
+        ]),
+        (3, 3)
+    )
+
+    skew = tf.reshape(
+        tf.stack([
+            1.0, skew_x, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        ]),
+        (3, 3)
+    )
+
+    transform = tf.matmul(tf.matmul(tf.matmul(skew, scale), rotation), translation)
+
+    stn_transform = transform[0:2, :]
+
+    return stn_transform
