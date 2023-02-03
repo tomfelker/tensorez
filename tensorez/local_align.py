@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorstore as ts
 import tensorez.modified_stn as stn
 import os
 import os.path
@@ -50,7 +51,7 @@ def local_align(
 
     flow_regularization_loss = 0,#1e-8,
     # number of learning stetps per lod
-    max_steps = 50,
+    max_steps = 100,
     # number of high lods to skip
     skip_lods = 0,
     # we start with low resolution images (LOD = level of detail) and step up to the full resolution image, each step increases resolution by this factor
@@ -75,10 +76,32 @@ def local_align(
     image_shape = lights[0].shape
     image_hw = image_shape.as_list()[-3:-1]
 
+    flow_dataset = ts.open({
+        'driver': 'n5',
+        'kvstore': {
+            'driver': 'file',
+            'path': os.path.join(alignment_output_dir, 'flow_dataset'),
+        },
+        'metadata': {
+            'dataType': 'float32',
+            'dimensions': (len(lights), 2, image_hw[0], image_hw[1]),
+        },
+        'create': True,
+        'delete_existing': True,
+    }).result()
+
+
+
     mask_image = generate_mask_image(image_shape)
 
     if debug_output_dir is not None:
         write_image(mask_image, os.path.join(debug_output_dir, 'mask_image.png'))
+
+        # eventually we'll generate these outputs in a nicer way, and or not even use them as we'd also want to use lucky imaging
+        # so, only doing them when we're doing debug output.
+        average_unaligned = tf.Variable(tf.zeros(image_shape))
+        average_global_aligned = tf.Variable(tf.zeros(image_shape))
+        average_local_aligned = tf.Variable(tf.zeros(image_shape))
 
     # todo: fft
     if blur_pixels != 0:
@@ -117,7 +140,10 @@ def local_align(
     for image_index, middleward_index in middle_out(target_image_index, len(lights)):
         image_bhwc = lights[image_index]
 
-        image_bhwc = image_with_zero_mean_and_unit_variance(image_bhwc)
+        if average_unaligned is not None:
+            average_unaligned.assign_add(image_bhwc)
+
+        normalized_image_bhwc = image_with_zero_mean_and_unit_variance(image_bhwc)
 
         prev_flow = None
 
@@ -158,20 +184,22 @@ def local_align(
             if lod_downsample_factor != 1:
                 lod_mask_image = tf.image.resize(mask_image, lod_hw, antialias=True)
                 lod_target_image = tf.image.resize(target_image, lod_hw, antialias=True)
-                lod_image = tf.image.resize(image_bhwc, lod_hw, antialias=True)
+                lod_image = tf.image.resize(normalized_image_bhwc, lod_hw, antialias=True)
             else:
                 lod_mask_image = mask_image
                 lod_target_image = target_image
-                lod_image = image_bhwc
+                lod_image = normalized_image_bhwc
 
             if blur_pixels != 0:
                 lod_target_image = tf.nn.conv2d(lod_target_image, blur_kernel, strides = 1, padding = 'SAME')
                 lod_image = tf.nn.conv2d(lod_image, blur_kernel, strides = 1, padding = 'SAME')
 
             flow = tf.Variable(tf.zeros(shape=(1, 2, lod_hw[-2], lod_hw[-1])))
+            # heh, random for testing
             #flow = tf.Variable((tf.random.uniform(shape=(1, 2, lod_hw[-2], lod_hw[-1])) - .5)*.1)
+            
             if prev_flow is not None:
-                # annoying permutation, move i to c
+                # annoying permutation, move i to c and back so we can resize, treating flow input coordinate dimension as channels
                 upscaled_flow = tf.transpose(prev_flow, perm=(0, 2, 3, 1))
                 upscaled_flow = tf.image.resize(upscaled_flow, lod_hw, antialias=True)
                 upscaled_flow = tf.transpose(upscaled_flow, perm=(0, 3, 1, 2))
@@ -199,18 +227,28 @@ def local_align(
             
                 
 
-        aligned_image = None
+        aligned_normalized_image = None
         if incrementally_improve_target_image or (debug_output_dir is not None):
-            aligned_image = transform_image(image_bhwc, alignment_transforms[image_index, :], flow)
+            aligned_normalized_image = transform_image(normalized_image_bhwc, alignment_transforms[image_index, :], flow)
 
         if incrementally_improve_target_image:
             new_image_weight = 1.0 / (image_index + 1)
-            target_image.assign(image_with_zero_mean_and_unit_variance(target_image * (1 - new_image_weight) + aligned_image * new_image_weight))
+            target_image.assign(image_with_zero_mean_and_unit_variance(target_image * (1 - new_image_weight) + normalized_image_bhwc * new_image_weight))
+
+        if average_global_aligned is not None:
+            global_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow = None)
+            average_global_aligned.assign_add(global_aligned)
+
+        if average_local_aligned is not None:
+            local_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow = flow)
+            average_local_aligned.assign_add(local_aligned)
 
         # todo: save to alignment_output_dir
+        flow_dataset[image_index:image_index+1, :, :, :] = flow
+        
 
         if debug_output_dir is not None:            
-            write_image(aligned_image, os.path.join(debug_output_dir, f"aligned_{image_index:08d}.png"), normalize = True)
+            write_image(local_aligned, os.path.join(debug_output_dir, f"local_aligned_{image_index:08d}.png"), normalize = True)
             if incrementally_improve_target_image:
                 write_image(target_image, os.path.join(debug_output_dir, f"target_after_{image_index:08d}.png"), normalize = True)
 
@@ -219,7 +257,16 @@ def local_align(
             flow_image = (image_with_zero_mean_and_unit_variance(flow_image) + 1.0) / 2.0
             write_image(flow_image, os.path.join(debug_output_dir, f"flow_{image_index:08d}.png"), saturate=True)
 
-    return alignment_transforms
+    if debug_output_dir is not None:
+        average_unaligned.assign(average_unaligned / len(lights))
+        average_global_aligned.assign(average_global_aligned / len(lights))
+        average_local_aligned.assign(average_local_aligned / len(lights))
+
+        write_image(average_unaligned, os.path.join(debug_output_dir, f"aa_average_unaligned.png"))
+        write_image(average_global_aligned, os.path.join(debug_output_dir, f"ab_average_global_aligned.png"))
+        write_image(average_local_aligned, os.path.join(debug_output_dir, f"ac_average_local_aligned.png"))
+
+    return alignment_transforms, flow_dataset
 
 def read_average_image_with_alignment_transforms(lights, alignment_output_dir, image_shape, dark_image):
 

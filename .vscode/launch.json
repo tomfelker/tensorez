@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python: Current File",
             "type": "python",
@@ -17,12 +18,19 @@
             "request": "launch",
             "program": "tensorez.py",
             "console": "integratedTerminal"
-        }
+        },
         {
             "name": "Python: Tensorez Lucky",
             "type": "python",
             "request": "launch",
             "program": "explorations_lucky.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: Tensorez Local Align",
+            "type": "python",
+            "request": "launch",
+            "program": "explorations_local_align.py",
             "console": "integratedTerminal"
         }
     ]

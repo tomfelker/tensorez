@@ -78,11 +78,12 @@ output_dir = create_timestamped_output_dir('local_align')
 
 
 #tf.config.run_functions_eagerly(True)
-observation.debug_frame_limit = 10
+observation.debug_frame_limit = 100
 
 local_align(
     lights=observation,
     alignment_output_dir = output_dir, # todo: caching
-    debug_output_dir = output_dir
+    debug_output_dir = output_dir,
+    max_steps=500
 )
 
