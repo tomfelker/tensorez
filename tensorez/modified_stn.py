@@ -81,7 +81,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, low_memory=Fal
         return spatial_transformer_network_function(input_fmap, theta, out_H, out_W, flow)    
 
 
-@tf.function
+@tf.function(jit_compile=True)
 def spatial_transformer_network_function(input_fmap, theta, out_H, out_W, flow):
 
     B = tf.shape(input_fmap)[0]

@@ -1,6 +1,6 @@
 import os
 
-#os.environ['TF_GPU_ALLOCATOR']='cuda_malloc_async'
+os.environ['TF_GPU_ALLOCATOR']='cuda_malloc_async'
 import tensorflow as tf
 
 
@@ -78,12 +78,12 @@ output_dir = create_timestamped_output_dir('local_align')
 
 
 #tf.config.run_functions_eagerly(True)
-observation.debug_frame_limit = 100
+observation.debug_frame_limit = 500
 
 local_align(
     lights=observation,
     alignment_output_dir = output_dir, # todo: caching
     debug_output_dir = output_dir,
-    max_steps=500
+    max_steps=200
 )
 

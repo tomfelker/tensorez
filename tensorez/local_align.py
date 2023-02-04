@@ -49,13 +49,14 @@ def local_align(
     # don't skew such that we'd move some part of the image by more than this many pixels
     max_update_skew_pixels = 3,
 
-    flow_regularization_loss = 0,#1e-8,
+    flow_regularization_loss = 1e+0,
     # number of learning stetps per lod
     max_steps = 100,
     # number of high lods to skip
     skip_lods = 0,
     # we start with low resolution images (LOD = level of detail) and step up to the full resolution image, each step increases resolution by this factor
     lod_factor = math.sqrt(2),
+    flow_downsample = 8,
     # the smallest lod is at least this big
     min_size = 32,
     # we blur the target images by this many pixels, to provide slopes to allow the images to roll into place
@@ -64,7 +65,8 @@ def local_align(
     incrementally_improve_target_image = False,
     allow_rotation = True,
     allow_scale = False,
-    allow_skew = False
+    allow_skew = False,
+    normalize_flow = True,
 ):
     if not allow_rotation:
         learning_rate_rotation = 0
@@ -74,7 +76,8 @@ def local_align(
         learning_rate_skew = 0
 
     image_shape = lights[0].shape
-    image_hw = image_shape.as_list()[-3:-1]
+    image_shape_hw = image_shape.as_list()[-3:-1]
+    flow_shape_hw = [int(image_shape_hw[0] // flow_downsample), int(image_shape_hw[1] // flow_downsample)]
 
     flow_dataset = ts.open({
         'driver': 'n5',
@@ -84,7 +87,7 @@ def local_align(
         },
         'metadata': {
             'dataType': 'float32',
-            'dimensions': (len(lights), 2, image_hw[0], image_hw[1]),
+            'dimensions': (len(lights), 2, flow_shape_hw[0], flow_shape_hw[1]),
         },
         'create': True,
         'delete_existing': True,
@@ -113,8 +116,8 @@ def local_align(
         blur_kernel = tf.tile(blur_kernel, multiples = (1, 1, 1, 3))
 
      # could compute different values for width and height, and even for rotation, but KISS:
-    max_dimension = max(image_hw[-2], image_hw[-1])
-    min_dimension = min(image_hw[-2], image_hw[-1])
+    max_dimension = max(image_shape_hw[-2], image_shape_hw[-1])
+    min_dimension = min(image_shape_hw[-2], image_shape_hw[-1])
 
     num_lods = 0
     while pow(lod_factor, -num_lods) * min_dimension > min_size:
@@ -154,9 +157,11 @@ def local_align(
         for lod in range(num_lods - 1, skip_lods - 1, -1):
 
             lod_downsample_factor = pow(lod_factor, lod)
-            lod_hw = [int(image_hw[0] / lod_downsample_factor), int(image_hw[1] / lod_downsample_factor)]
-            lod_max_dimension = max(lod_hw[-2], lod_hw[-1])
+            lod_image_shape_hw = [int(image_shape_hw[0] / lod_downsample_factor), int(image_shape_hw[1] / lod_downsample_factor)]
+            lod_max_dimension = max(lod_image_shape_hw[-2], lod_image_shape_hw[-1])
 
+            lod_flow_shape_hw = [int(lod_image_shape_hw[0] // flow_downsample), int(lod_image_shape_hw[1] // flow_downsample)]
+            
             transform_learning_rate_for_lod = tf.constant([
                 learning_rate_translation * lod_downsample_factor,
                 learning_rate_translation * lod_downsample_factor,
@@ -182,9 +187,9 @@ def local_align(
             # todo: memoize downsampled_mask_image across lods
             # todo: if we don't incrementally_improve_target_image, we could memoize it too
             if lod_downsample_factor != 1:
-                lod_mask_image = tf.image.resize(mask_image, lod_hw, antialias=True)
-                lod_target_image = tf.image.resize(target_image, lod_hw, antialias=True)
-                lod_image = tf.image.resize(normalized_image_bhwc, lod_hw, antialias=True)
+                lod_mask_image = tf.image.resize(mask_image, lod_image_shape_hw, antialias=True)
+                lod_target_image = tf.image.resize(target_image, lod_image_shape_hw, antialias=True)
+                lod_image = tf.image.resize(normalized_image_bhwc, lod_image_shape_hw, antialias=True)
             else:
                 lod_mask_image = mask_image
                 lod_target_image = target_image
@@ -194,14 +199,14 @@ def local_align(
                 lod_target_image = tf.nn.conv2d(lod_target_image, blur_kernel, strides = 1, padding = 'SAME')
                 lod_image = tf.nn.conv2d(lod_image, blur_kernel, strides = 1, padding = 'SAME')
 
-            flow = tf.Variable(tf.zeros(shape=(1, 2, lod_hw[-2], lod_hw[-1])))
+            flow = tf.Variable(tf.zeros(shape=(1, 2, lod_flow_shape_hw[-2], lod_flow_shape_hw[-1])))
             # heh, random for testing
-            #flow = tf.Variable((tf.random.uniform(shape=(1, 2, lod_hw[-2], lod_hw[-1])) - .5)*.1)
+            #flow = tf.Variable((tf.random.uniform(shape=(1, 2, lod_image_shape_hw[-2], lod_image_shape_hw[-1])) - .5)*.1)
             
             if prev_flow is not None:
                 # annoying permutation, move i to c and back so we can resize, treating flow input coordinate dimension as channels
                 upscaled_flow = tf.transpose(prev_flow, perm=(0, 2, 3, 1))
-                upscaled_flow = tf.image.resize(upscaled_flow, lod_hw, antialias=True)
+                upscaled_flow = tf.image.resize(upscaled_flow, lod_flow_shape_hw, antialias=True)
                 upscaled_flow = tf.transpose(upscaled_flow, perm=(0, 3, 1, 2))
                 flow.assign(upscaled_flow)
             prev_flow = flow
@@ -236,11 +241,11 @@ def local_align(
             target_image.assign(image_with_zero_mean_and_unit_variance(target_image * (1 - new_image_weight) + normalized_image_bhwc * new_image_weight))
 
         if average_global_aligned is not None:
-            global_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow = None)
+            global_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow_bihw = None)
             average_global_aligned.assign_add(global_aligned)
 
         if average_local_aligned is not None:
-            local_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow = flow)
+            local_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow_bihw = flow)
             average_local_aligned.assign_add(local_aligned)
 
         # todo: save to alignment_output_dir
@@ -252,21 +257,58 @@ def local_align(
             if incrementally_improve_target_image:
                 write_image(target_image, os.path.join(debug_output_dir, f"target_after_{image_index:08d}.png"), normalize = True)
 
-            flow_image = tf.transpose(flow, perm=(0,2,3,1))
-            flow_image = tf.concat([flow_image, tf.zeros(shape = (1,flow_image.shape[1], flow_image.shape[2], 1))], axis=-1)
-            flow_image = (image_with_zero_mean_and_unit_variance(flow_image) + 1.0) / 2.0
-            write_image(flow_image, os.path.join(debug_output_dir, f"flow_{image_index:08d}.png"), saturate=True)
+            write_flow_image(flow, os.path.join(debug_output_dir, f"flow_{image_index:08d}.png"))
 
     if debug_output_dir is not None:
+        # so far we've skipped the target image, add it in
+        unnormalized_target_image = lights[target_image_index]
+        average_unaligned.assign_add(unnormalized_target_image)
+        average_global_aligned.assign_add(unnormalized_target_image)
+        average_local_aligned.assign_add(unnormalized_target_image)
+
         average_unaligned.assign(average_unaligned / len(lights))
         average_global_aligned.assign(average_global_aligned / len(lights))
         average_local_aligned.assign(average_local_aligned / len(lights))
 
-        write_image(average_unaligned, os.path.join(debug_output_dir, f"aa_average_unaligned.png"))
-        write_image(average_global_aligned, os.path.join(debug_output_dir, f"ab_average_global_aligned.png"))
-        write_image(average_local_aligned, os.path.join(debug_output_dir, f"ac_average_local_aligned.png"))
+        write_image(average_unaligned, os.path.join(debug_output_dir, "aa_average_unaligned.png"))
+        write_image(average_global_aligned, os.path.join(debug_output_dir, "ab_average_global_aligned.png"))
+        write_image(average_local_aligned, os.path.join(debug_output_dir, "ad_average_local_aligned.png"))
+
+    if normalize_flow:        
+        num_flows = flow_dataset.shape[0]
+        average_flow = tf.Variable(tf.zeros(shape=(1, 2, flow_shape_hw[0], flow_shape_hw[1])))
+        for image_index in range(num_flows):
+            print(f'Averaging flow {image_index+1} of {num_flows}')
+            flow = flow_dataset[image_index:image_index+1]
+            average_flow.assign_add(flow)
+            if debug_output_dir is not None:
+                write_flow_image(flow, os.path.join(debug_output_dir, f"flow_normalized_{image_index:08d}.png"))
+        average_flow.assign(average_flow / num_flows)
+
+        if debug_output_dir is not None:
+            write_flow_image(average_flow, os.path.join(debug_output_dir, 'average_flow.png'))
+
+        for image_index in range(num_flows):
+            print(f'Normalizing flow {image_index+1} of {num_flows}')
+            flow_dataset[image_index:image_index+1] = flow_dataset[image_index:image_index+1] - average_flow
+
+        if debug_output_dir is not None:
+            average_image = tf.Variable(tf.zeros(image_shape))
+            for image_index in range(len(lights)):
+                image = lights[image_index]
+                image = transform_image(image,  alignment_transforms[image_index, :], flow_dataset[image_index:image_index+1,:])
+                average_image.assign_add(image)
+            average_image.assign(average_image / len(lights))
+            write_image(average_image, os.path.join(debug_output_dir, "ac_average_local_aligned_normalized.png"))
 
     return alignment_transforms, flow_dataset
+
+def write_flow_image(flow_bihw, filename, flow_scale = 100, **write_image_kwargs):
+    flow_image = tf.transpose(flow_bihw, perm=(0,2,3,1))
+    flow_image = tf.concat([flow_image, tf.zeros(shape = (1,flow_image.shape[1], flow_image.shape[2], 1))], axis=-1)
+    flow_image *= flow_scale
+    flow_image += 0.5    
+    write_image(flow_image, filename, saturate = True, **write_image_kwargs)
 
 def read_average_image_with_alignment_transforms(lights, alignment_output_dir, image_shape, dark_image):
 
@@ -286,7 +328,7 @@ def read_average_image_with_alignment_transforms(lights, alignment_output_dir, i
     return target_image / len(lights)
 
 
-@tf.function
+@tf.function#(jit_compile=True)
 def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, transform_learning_rate, transform_max_update, flow_learning_rate, flow_max_update, flow_regularization_loss, max_steps):
 
     for step in range(max_steps):
@@ -313,23 +355,26 @@ def local_align_training_loop(image_bhwc, alignment_transform, flow, target_imag
 
     return alignment_transform, flow
 
-
-
-
-
 # alignment_transform's last index is [delta_x, delta_y, theta_radians, log_scale_x, log_scale_y, skew_x]
-@tf.function
-def transform_image(unaligned_image_bhwc, alignment_transform, flow):
-    
-    return stn.spatial_transformer_network(unaligned_image_bhwc, alignment_transform_to_stn_theta(alignment_transform), flow=flow)
+@tf.function#(jit_compile=True)
+def transform_image(unaligned_image_bhwc, alignment_transform, flow_bihw = None):
+    if flow_bihw is not None:
+        if flow_bihw.shape[2] != unaligned_image_bhwc.shape[1] or flow_bihw.shape[3] != unaligned_image_bhwc.shape[2]:
+            flow_bihw = upscale_flow(flow_bihw, [unaligned_image_bhwc.shape[1], unaligned_image_bhwc.shape[2]])
+    return stn.spatial_transformer_network(unaligned_image_bhwc, alignment_transform_to_stn_theta(alignment_transform), flow=flow_bihw)
 
-@tf.function
+@tf.function(jit_compile=True)
 def alignment_loss(unaligned_image_bhwc, target_image_bhwc, mask_image_bhwc):
     return tf.math.reduce_mean(tf.math.square(tf.math.multiply((unaligned_image_bhwc - target_image_bhwc), mask_image_bhwc)), axis = (-3, -2, -1))
 
-@tf.function
+@tf.function(jit_compile=True)
 def regularization_loss(flow, flow_regularization_loss):
     # todo: highpass?
-    return tf.reduce_mean(flow) * flow_regularization_loss
+    return tf.reduce_mean(flow * flow) * flow_regularization_loss
 
-
+@tf.function#(jit_compile=True)
+def upscale_flow(flow_bihw, shape_hw):
+    flow_bihw = tf.transpose(flow_bihw, perm=(0, 2, 3, 1))
+    flow_bihw = tf.image.resize(flow_bihw, shape_hw, antialias=True)
+    flow_bihw = tf.transpose(flow_bihw, perm=(0, 3, 1, 2))
+    return flow_bihw
