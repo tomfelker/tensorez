@@ -23,7 +23,7 @@ def local_align(
     # an iterable yielding the images to align
     lights,
     # we will write the alignment info in here
-    alignment_output_dir,
+    flow_dataset_path,
     # the index of the lights image to align everything else with (default is the middle of the array)
     target_image_index = None,    
     # if not none, we will dump a bunch of debug images here
@@ -83,7 +83,7 @@ def local_align(
         'driver': 'n5',
         'kvstore': {
             'driver': 'file',
-            'path': os.path.join(alignment_output_dir, 'flow_dataset'),
+            'path': flow_dataset_path,
         },
         'metadata': {
             'dataType': 'float32',
@@ -143,7 +143,7 @@ def local_align(
     for image_index, middleward_index in middle_out(target_image_index, len(lights)):
         image_bhwc = lights[image_index]
 
-        if average_unaligned is not None:
+        if debug_output_dir is not None:
             average_unaligned.assign_add(image_bhwc)
 
         normalized_image_bhwc = image_with_zero_mean_and_unit_variance(image_bhwc)
@@ -240,17 +240,15 @@ def local_align(
             new_image_weight = 1.0 / (image_index + 1)
             target_image.assign(image_with_zero_mean_and_unit_variance(target_image * (1 - new_image_weight) + normalized_image_bhwc * new_image_weight))
 
-        if average_global_aligned is not None:
+        if debug_output_dir is not None:
             global_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow_bihw = None)
             average_global_aligned.assign_add(global_aligned)
 
-        if average_local_aligned is not None:
             local_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow_bihw = flow)
             average_local_aligned.assign_add(local_aligned)
 
-        # todo: save to alignment_output_dir
+        # store it to the disk - magic!
         flow_dataset[image_index:image_index+1, :, :, :] = flow
-        
 
         if debug_output_dir is not None:            
             write_image(local_aligned, os.path.join(debug_output_dir, f"local_aligned_{image_index:08d}.png"), normalize = True)
@@ -309,23 +307,6 @@ def write_flow_image(flow_bihw, filename, flow_scale = 100, **write_image_kwargs
     flow_image *= flow_scale
     flow_image += 0.5    
     write_image(flow_image, filename, saturate = True, **write_image_kwargs)
-
-def read_average_image_with_alignment_transforms(lights, alignment_output_dir, image_shape, dark_image):
-
-    # todo - load from alignment_output_dir
-    alignment_transforms = None
-    flow = None
-
-    target_image = tf.Variable(tf.zeros(image_shape))
-    for image_index, image_bhwc in enumerate(lights):    
-        if dark_image is not None:
-            image_bhwc = image_bhwc - dark_image
-
-        alignment_transform = alignment_transforms[image_index, :]
-        image_bhwc = transform_image(image_bhwc, alignment_transform, flow)
-        target_image.assign_add(image_bhwc)
-
-    return target_image / len(lights)
 
 
 @tf.function#(jit_compile=True)

@@ -1,17 +1,20 @@
 import tensorez.align as align
+import tensorez.local_align as local_align
 from tensorez.util import *
 import tensorflow as tf
+import tensorstore as ts
 import hashlib
 import os.path
 import numpy as np
 import gc
 
 class Observation:
-    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, crop = None, crop_align = 2, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}, align_by_center_of_mass_only_even_shifts = False):
+    def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, local_align = False, crop = None, crop_align = 2, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}, align_by_center_of_mass_only_even_shifts = False):
         self.lights = lights
         self.darks = darks
         self.align_by_center_of_mass = align_by_center_of_mass
         self.align_by_content = align_by_content
+        self.local_align = local_align
         self.compute_alignment_transforms_kwargs = compute_alignment_transforms_kwargs
         self.crop = crop
         self.crop_align = crop_align
@@ -21,6 +24,7 @@ class Observation:
 
         self.dark_image = None
         self.alignment_transforms = None
+        self.local_alignment_dataset = None
 
         self.debug_frame_limit = None
 
@@ -48,11 +52,13 @@ class Observation:
             dark_cache_npy_filename = None
             min_files_to_cache = 4 # because our cache is float32 per sample, vs maybe 10 bits per sample for the source files
             if len(self.darks) >= min_files_to_cache:
-                dir = os.path.dirname(self.darks.filenames_and_raw_start_frames[0][0])
-                # todo: could throw file modification times in here as well
                 hash_info = self.darks.get_cache_hash_info()
                 hash = hashlib.sha256(repr(hash_info).encode('utf-8')).hexdigest()
-                basename = 'tensorez_dark_cache_' + hash
+
+                dir = os.path.join(os.path.dirname(self.darks.filenames_and_raw_start_frames[0][0]), 'tensorez_cache', hash)
+                os.makedirs(dir, exist_ok=True)
+
+                basename = 'dark_cache'
                 basename_npy = basename + '.npz'
                 basename_txt = basename + '.txt'
                 dark_cache_npz_filename = os.path.join(dir, basename_npy)
@@ -112,17 +118,33 @@ class Observation:
         if self.align_by_center_of_mass:
             hash_info += f"align_by_center_of_mass_only_even_shifts: {self.align_by_center_of_mass_only_even_shifts}\n"
         hash_info += f"compute_alignment_transform({self.compute_alignment_transforms_kwargs})\n"
+        hash_info += f"local_align:{self.local_align}\n"
 
         hash = hashlib.sha256(repr(hash_info).encode('utf-8')).hexdigest()
-        dir = os.path.dirname(self.lights.filenames_and_raw_start_frames[0][0])
-        basename = 'tensorez_alignment_cache_' + hash
+        
+        dir = os.path.join(os.path.dirname(self.lights.filenames_and_raw_start_frames[0][0]), 'tensorez_cache', hash)
+        os.makedirs(dir, exist_ok=True)
+
+        basename = 'alignment_transforms'
         basename_npy = basename + '.npy'
         basename_txt = basename + '.txt'
         alignment_cache_npy_filename = os.path.join(dir, basename_npy)
         alignment_cache_txt_filename = os.path.join(dir, basename_txt)
 
+        if self.local_align:
+            local_alignment_dataset_dir = os.path.join(dir, 'flow_dataset')
+
         try:            
             self.alignment_transforms = np.load(alignment_cache_npy_filename)
+            if self.local_align:
+                self.local_alignment_dataset = ts.open(open=True, read=True, create=False, write=False, spec={
+                    'driver': 'n5',
+                    'kvstore': {
+                        'driver': 'file',
+                        'path': local_alignment_dataset_dir,
+                    },
+                }).result()
+
             print(f"Loaded alignment transforms from '{alignment_cache_npy_filename}'.")
             return
         except FileNotFoundError:
@@ -131,7 +153,12 @@ class Observation:
         try:
             # we're passing ourselves in (so that the compute process can have the dark images subtracted, but we need to avoid infinite recursion
             self.computing_alignment_transforms = True            
-            self.alignment_transforms = align.compute_alignment_transforms(lights = self, **self.compute_alignment_transforms_kwargs)
+            if self.local_align:
+                self.alignment_transforms, self.local_alignment_dataset = local_align.local_align(lights = self, flow_dataset_path=local_alignment_dataset_dir, **self.compute_alignment_transforms_kwargs)                
+                # the dataset dir is already written to at this point, but we'll save the alignment transforms below, and won't consider
+                # things done until that point.  that gives a weak facsimile of atomicity
+            else:
+                self.alignment_transforms = align.compute_alignment_transforms(lights = self, **self.compute_alignment_transforms_kwargs)
         finally:
             self.computing_alignment_transforms = False
 
@@ -174,7 +201,12 @@ class Observation:
                 dark_variance = crop_image(dark_variance, crop=self.crop, crop_align=self.crop_align)
 
         if self.alignment_transforms is not None and not skip_content_align:
-            image = align.transform_image(image, self.alignment_transforms[index])
+            flow = None
+            if self.local_alignment_dataset is not None:
+                flow = self.local_alignment_dataset[index : index + 1, :, :, :]
+                image = local_align.transform_image(image, self.alignment_transforms[index], flow_bihw = flow)
+            else:
+                image = align.transform_image(image, self.alignment_transforms[index])
             if dark_variance is not None:
                 dark_variance = align.transform_image(dark_variance, self.alignment_transforms[index])
 

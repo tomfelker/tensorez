@@ -17,6 +17,7 @@ data/**/*.npz
 gallery/**
 obd/**
 output/*
+**/tensorez_cache/**
 **/__pycache__/*
 *.zip
 *.pdf
