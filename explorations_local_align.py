@@ -82,7 +82,7 @@ observation.debug_frame_limit = 500
 
 local_align(
     lights=observation,
-    alignment_output_dir = output_dir, # todo: caching
+    flow_dataset_path = os.path.join(output_dir, 'flow_dataset'),
     debug_output_dir = output_dir,
     max_steps=200
 )

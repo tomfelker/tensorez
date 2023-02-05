@@ -279,8 +279,6 @@ def local_align(
             print(f'Averaging flow {image_index+1} of {num_flows}')
             flow = flow_dataset[image_index:image_index+1]
             average_flow.assign_add(flow)
-            if debug_output_dir is not None:
-                write_flow_image(flow, os.path.join(debug_output_dir, f"flow_normalized_{image_index:08d}.png"))
         average_flow.assign(average_flow / num_flows)
 
         if debug_output_dir is not None:
@@ -288,7 +286,12 @@ def local_align(
 
         for image_index in range(num_flows):
             print(f'Normalizing flow {image_index+1} of {num_flows}')
-            flow_dataset[image_index:image_index+1] = flow_dataset[image_index:image_index+1] - average_flow
+
+            normalized_flow = flow_dataset[image_index:image_index+1] - average_flow
+            if debug_output_dir is not None:
+                write_flow_image(normalized_flow, os.path.join(debug_output_dir, f"flow_normalized_{image_index:08d}.png"))
+
+            flow_dataset[image_index:image_index+1] = normalized_flow
 
         if debug_output_dir is not None:
             average_image = tf.Variable(tf.zeros(image_shape))
@@ -302,11 +305,19 @@ def local_align(
     return alignment_transforms, flow_dataset
 
 def write_flow_image(flow_bihw, filename, flow_scale = 100, **write_image_kwargs):
-    flow_image = tf.transpose(flow_bihw, perm=(0,2,3,1))
-    flow_image = tf.concat([flow_image, tf.zeros(shape = (1,flow_image.shape[1], flow_image.shape[2], 1))], axis=-1)
-    flow_image *= flow_scale
-    flow_image += 0.5    
-    write_image(flow_image, filename, saturate = True, **write_image_kwargs)
+    flow_bhwi = tf.transpose(flow_bihw, perm=(0,2,3,1))
+    flow_mag = tf.sqrt(tf.square(flow_bhwi[..., 0]), tf.square(flow_bhwi[...,1]))
+    flow_theta = tf.atan2(flow_bhwi[..., 1], flow_bhwi[..., 0])
+    flow_hsv_bhwc = tf.stack(
+        [
+            tf.math.floormod(flow_theta / ( 2.0 * math.pi), 1.0),            
+            tf.ones(shape = (flow_bhwi.shape[0], flow_bhwi.shape[1], flow_bhwi.shape[2])),
+            tf.minimum(flow_mag * flow_scale, 1.0)
+        ],
+        axis=-1
+    )
+    flow_rgb_bhwc = tf.image.hsv_to_rgb(flow_hsv_bhwc)
+    write_image(flow_rgb_bhwc, filename, **write_image_kwargs)
 
 
 @tf.function#(jit_compile=True)

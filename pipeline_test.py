@@ -117,9 +117,9 @@ for step in range(steps):
 
         algorithm=LuckinessAlgorithmFrequencyBands,
         algorithm_kwargs=dict(
-            noise_wavelength_pixels=15,
-            crossover_wavelength_pixels=25,
-            isoplanatic_patch_pixels=35,
+            noise_wavelength_pixels=5,
+            crossover_wavelength_pixels=45,
+            isoplanatic_patch_pixels=65,
             channel_crosstalk = 0,
             ),
 
