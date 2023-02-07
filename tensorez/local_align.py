@@ -5,6 +5,7 @@ import os
 import os.path
 
 from tensorez.util import *
+from tensorez.luckiness import *
 
 # Goal of all this is something like:
 #
@@ -49,7 +50,7 @@ def local_align(
     # don't skew such that we'd move some part of the image by more than this many pixels
     max_update_skew_pixels = 3,
 
-    flow_regularization_loss = 1e+0,
+    flow_regularization_loss = 1e-6,
     # number of learning stetps per lod
     max_steps = 100,
     # number of high lods to skip
@@ -77,7 +78,7 @@ def local_align(
 
     image_shape = lights[0].shape
     image_shape_hw = image_shape.as_list()[-3:-1]
-    flow_shape_hw = [int(image_shape_hw[0] // flow_downsample), int(image_shape_hw[1] // flow_downsample)]
+    flow_shape_hw = [int(image_shape_hw[0] // flow_downsample // 2) * 2, int(image_shape_hw[1] // flow_downsample // 2) * 2]
 
     flow_dataset = ts.open({
         'driver': 'n5',
@@ -157,10 +158,10 @@ def local_align(
         for lod in range(num_lods - 1, skip_lods - 1, -1):
 
             lod_downsample_factor = pow(lod_factor, lod)
-            lod_image_shape_hw = [int(image_shape_hw[0] / lod_downsample_factor), int(image_shape_hw[1] / lod_downsample_factor)]
+            lod_image_shape_hw = [int(image_shape_hw[0] // lod_downsample_factor // 2) * 2, int(image_shape_hw[1] // lod_downsample_factor // 2) * 2]
             lod_max_dimension = max(lod_image_shape_hw[-2], lod_image_shape_hw[-1])
 
-            lod_flow_shape_hw = [int(lod_image_shape_hw[0] // flow_downsample), int(lod_image_shape_hw[1] // flow_downsample)]
+            lod_flow_shape_hw = [int(lod_image_shape_hw[0] // flow_downsample // 2) * 2, int(lod_image_shape_hw[1] // flow_downsample // 2) * 2]
             
             transform_learning_rate_for_lod = tf.constant([
                 learning_rate_translation * lod_downsample_factor,
@@ -213,9 +214,12 @@ def local_align(
 
             print(f'Aligning image {image_index + 1} of {len(lights)}, lod {num_lods - lod} of {num_lods - skip_lods}')
             
+            
+
             new_alignment_transform, new_flow = local_align_training_loop(
                 lod_image,
-                alignment_transform=alignment_transforms[image_index, :],
+                # it doesn't seem to like using a slice of a variable, so need to make a new one
+                alignment_transform=tf.Variable(alignment_transforms[image_index, :]),
                 flow=flow,
                 target_image=lod_target_image,
                 mask_image=lod_mask_image,
@@ -304,51 +308,62 @@ def local_align(
 
     return alignment_transforms, flow_dataset
 
-def write_flow_image(flow_bihw, filename, flow_scale = 100, **write_image_kwargs):
-    flow_bhwi = tf.transpose(flow_bihw, perm=(0,2,3,1))
-    flow_mag = tf.sqrt(tf.square(flow_bhwi[..., 0]), tf.square(flow_bhwi[...,1]))
-    flow_theta = tf.atan2(flow_bhwi[..., 1], flow_bhwi[..., 0])
-    flow_hsv_bhwc = tf.stack(
-        [
-            tf.math.floormod(flow_theta / ( 2.0 * math.pi), 1.0),            
-            tf.ones(shape = (flow_bhwi.shape[0], flow_bhwi.shape[1], flow_bhwi.shape[2])),
-            tf.minimum(flow_mag * flow_scale, 1.0)
-        ],
-        axis=-1
-    )
-    flow_rgb_bhwc = tf.image.hsv_to_rgb(flow_hsv_bhwc)
-    write_image(flow_rgb_bhwc, filename, **write_image_kwargs)
+def write_flow_image(flow_bihw, filename, flow_scale = 100, style = 'rg', **write_image_kwargs):
+    if style is 'rg':
+        flow_image = tf.transpose(flow_bihw, perm=(0,2,3,1))
+        flow_image = tf.concat([flow_image, tf.zeros(shape = (1,flow_image.shape[1], flow_image.shape[2], 1))], axis=-1)
+        flow_image *= flow_scale
+        flow_image += 0.5    
+        write_image(flow_image, filename, saturate = True, **write_image_kwargs)
+    if style is 'hsv_dark' or style is 'hsv_bright':
+        flow_bhwi = tf.transpose(flow_bihw, perm=(0,2,3,1))
+        flow_mag = tf.sqrt(tf.square(flow_bhwi[..., 0]), tf.square(flow_bhwi[...,1]))
+        flow_theta = tf.atan2(flow_bhwi[..., 1], flow_bhwi[..., 0])
+        flow_hsv_bhwc = tf.stack(
+            [
+                tf.math.floormod(flow_theta / ( 2.0 * math.pi), 1.0),            
+                tf.ones(shape = (flow_bhwi.shape[0], flow_bhwi.shape[1], flow_bhwi.shape[2])),
+                tf.minimum(flow_mag * flow_scale, 1.0)
+            ],
+            axis=-1
+        )
+        flow_rgb_bhwc = tf.image.hsv_to_rgb(flow_hsv_bhwc)
+        write_image(flow_rgb_bhwc, filename, **write_image_kwargs)
 
 
-@tf.function#(jit_compile=True)
+# can't be function because optimizer creates variables - even passing it in didn't help.
+#@tf.function#(jit_compile=False)
 def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, transform_learning_rate, transform_max_update, flow_learning_rate, flow_max_update, flow_regularization_loss, max_steps):
 
+    # for Adam, need to nerf learning rate a lot or it way overshoots on the first update
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
+
     for step in range(max_steps):
-        variable_list = [alignment_transform, flow]
+        variables = [alignment_transform, flow]
 
-        with tf.GradientTape(persistent=True) as tape:
-            tape.watch(variable_list)
+        with tf.GradientTape() as tape:
+            tape.watch(variables)
             alignment_guess_image = transform_image(image_bhwc, alignment_transform, flow)
-            guess_loss = alignment_loss(alignment_guess_image, target_image, mask_image) + regularization_loss(flow, flow_regularization_loss)
+            loss = alignment_loss(alignment_guess_image, target_image, mask_image) + regularization_loss(flow, flow_regularization_loss)
 
-        transform_gradient = tape.gradient(guess_loss, alignment_transform)
-        flow_gradient = tape.gradient(guess_loss, flow)
-        del tape
+        gradients = tape.gradient(loss, variables)
 
-        transform_update = transform_gradient * transform_learning_rate
-        transform_update = tf.clip_by_value(transform_update, -transform_max_update, transform_max_update)
-        alignment_transform -= transform_update
+        optimizer.apply_gradients(zip(gradients, variables))
 
-        flow_update = flow_gradient * flow_learning_rate
-        flow_update = tf.clip_by_value(flow_update, -flow_max_update, flow_max_update)
-        flow -= flow_update
+        #transform_update = transform_gradient * transform_learning_rate
+        #transform_update = tf.clip_by_value(transform_update, -transform_max_update, transform_max_update)
+        #alignment_transform -= transform_update
 
-        tf.print("loss:", guess_loss, "after step", step, "of", max_steps)
+        #flow_update = flow_gradient * flow_learning_rate
+        #flow_update = tf.clip_by_value(flow_update, -flow_max_update, flow_max_update)
+        #flow -= flow_update
+
+        tf.print("loss:", loss, "after step", step, "of", max_steps, output_stream=sys.stdout)
 
     return alignment_transform, flow
 
 # alignment_transform's last index is [delta_x, delta_y, theta_radians, log_scale_x, log_scale_y, skew_x]
-@tf.function#(jit_compile=True)
+@tf.function(jit_compile=False)
 def transform_image(unaligned_image_bhwc, alignment_transform, flow_bihw = None):
     if flow_bihw is not None:
         if flow_bihw.shape[2] != unaligned_image_bhwc.shape[1] or flow_bihw.shape[3] != unaligned_image_bhwc.shape[2]:
@@ -360,13 +375,22 @@ def alignment_loss(unaligned_image_bhwc, target_image_bhwc, mask_image_bhwc):
     return tf.math.reduce_mean(tf.math.square(tf.math.multiply((unaligned_image_bhwc - target_image_bhwc), mask_image_bhwc)), axis = (-3, -2, -1))
 
 @tf.function(jit_compile=True)
-def regularization_loss(flow, flow_regularization_loss):
+def regularization_loss(flow_bihw, flow_regularization_loss):
     # todo: highpass?
-    return tf.reduce_mean(flow * flow) * flow_regularization_loss
+    #return tf.reduce_mean(flow * flow) * flow_regularization_loss
 
+    fft_of_flow = spatial_to_frequency_domain(flow_bihw)
+    fft_freqs = fft_spatial_frequencies_per_pixel(flow_bihw.shape) * tf.cast(max(flow_bihw.shape[-2], flow_bihw.shape[-1]),dtype=tf.float32)
+    
+    # mumble mumble Kolmogorov
+    fft_freqs = tf.pow(fft_freqs, 5.0 / 3.0)
+
+    return tf.reduce_mean(tf.abs(fft_of_flow) * fft_freqs) * flow_regularization_loss
+
+# XLA (jit_compile) breaks with tf.image.resize because the gradient isn't implemented.
 @tf.function#(jit_compile=True)
 def upscale_flow(flow_bihw, shape_hw):
     flow_bihw = tf.transpose(flow_bihw, perm=(0, 2, 3, 1))
-    flow_bihw = tf.image.resize(flow_bihw, shape_hw, antialias=True)
+    flow_bihw = tf.image.resize(flow_bihw, tf.stop_gradient(shape_hw), antialias=True)
     flow_bihw = tf.transpose(flow_bihw, perm=(0, 3, 1, 2))
     return flow_bihw

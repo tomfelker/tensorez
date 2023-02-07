@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-import tensorflow_graphics as tfg
 import fnmatch
 import os
 import glob
@@ -114,7 +113,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
             image = tf.cast(image, tf.float32) / 255.0
             image = tf.expand_dims(image, axis = -4)
             if srgb_to_linear:
-                image = tfg.image.color_space.linear_rgb.from_srgb(image)
+                image = convert_srgb_to_linear(image)
 
     elif fnmatch.fnmatch(filename, '*.cr2'):
         # For raw files, we will read them into a full color image, but with the bayer pattern... this way,
@@ -187,7 +186,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
         if to_float:
             image = tf.cast(image, tf.float32) / 255.0
             if srgb_to_linear:
-                image = tfg.image.color_space.linear_rgb.from_srgb(image)
+                image = convert_srgb_to_linear(image)
 
     image = crop_image(image, crop = crop, crop_align = crop_align, crop_offsets = crop_offsets, crop_center = crop_center)
         
@@ -267,8 +266,16 @@ def write_image(image, filename, normalize = False, saturate = True, frequency_d
         image = image / max_val
     if saturate:
         image = tf.maximum(0.0, tf.minimum(1.0, image))
+
     image = promote_to_three_channels(image)
-    image = tfg.image.color_space.srgb.from_linear_rgb(image) * 255.0  #hmm, correct rounding?
+    image = convert_linear_to_srgb(image)
+    # Multiplying by 255.0 is arguable here - it's the inverse of dividing by 255.0, done above in read_image(),
+    # which is also arguable, but has the nice property that you can check for clipping by checking for float 1.0,
+    # without having to know the bit depth of the original image.  So using 255 preserves that sort of thing, where
+    # only floats exactly >= 1.0 will become 255, so 255 values "almost always" (in the technical sense) indicate clipping.
+    # Anyone who cares about this should just use linear float for everything, anything less is a vestige
+    # of tiny computers and huge CRT monitors.
+    image *= 255.0
     image = tf.cast(image, tf.uint8)
     image = tf.image.encode_png(image)
     tf.io.write_file(filename, image)
@@ -619,3 +626,25 @@ def alignment_transform_to_stn_theta(alignment_transform):
     stn_transform = transform[0:2, :]
 
     return stn_transform
+
+# sRGB conversion stuff adapted from tensorflow_graphics, but without asserts requiring specific shapes that break XLR
+
+sRGB_A = 0.055
+sRGB_PHI = 12.92
+sRGB_K0 = 0.04045
+sRGB_gamma = 2.4
+
+@tf.function(jit_compile=True)
+def convert_srgb_to_linear(image):
+    image = tf.convert_to_tensor(image)
+    return tf.where(image <= sRGB_K0, image / sRGB_PHI, ((image + sRGB_A) / (1 + sRGB_A))**sRGB_gamma)
+
+@tf.function(jit_compile=True)
+def convert_linear_to_srgb(image):
+    image = tf.convert_to_tensor(image)
+    
+    # Adds a small eps to avoid nan gradients from the second branch of
+    # tf.where.
+    image += sys.float_info.epsilon
+    return tf.where(image <= sRGB_K0 / sRGB_PHI, image * sRGB_PHI,
+                    (1 + sRGB_A) * (image**(1 / sRGB_gamma)) - sRGB_A)

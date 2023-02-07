@@ -30,6 +30,8 @@ class Observation:
 
         self.computing_alignment_transforms = False
 
+        self.debug_output_dir = None
+
         # this should be all things that might affect the result, for use in logs and such so we can recreate things
         self.tensorez_steps = 'Observation with:\n'
         self.tensorez_steps += f'\tlights: {self.lights.get_cache_hash_info()}\n'
@@ -154,11 +156,11 @@ class Observation:
             # we're passing ourselves in (so that the compute process can have the dark images subtracted, but we need to avoid infinite recursion
             self.computing_alignment_transforms = True            
             if self.local_align:
-                self.alignment_transforms, self.local_alignment_dataset = local_align.local_align(lights = self, flow_dataset_path=local_alignment_dataset_dir, **self.compute_alignment_transforms_kwargs)                
+                self.alignment_transforms, self.local_alignment_dataset = local_align.local_align(lights = self, flow_dataset_path=local_alignment_dataset_dir, debug_output_dir=self.debug_output_dir, **self.compute_alignment_transforms_kwargs)                
                 # the dataset dir is already written to at this point, but we'll save the alignment transforms below, and won't consider
                 # things done until that point.  that gives a weak facsimile of atomicity
             else:
-                self.alignment_transforms = align.compute_alignment_transforms(lights = self, **self.compute_alignment_transforms_kwargs)
+                self.alignment_transforms = align.compute_alignment_transforms(lights = self, debug_output_dir=self.debug_output_dir, **self.compute_alignment_transforms_kwargs)
         finally:
             self.computing_alignment_transforms = False
 

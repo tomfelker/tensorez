@@ -15,7 +15,7 @@ from tensorez.align import *
 import matplotlib.pyplot as plt
 
 observation = Observation(
-    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step=1, end_frame=500),
+    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step=1, end_frame=501),
     darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER')),
     align_by_content=True,
     local_align=True
@@ -78,6 +78,8 @@ observation = Observation(
 
 
 output_dir = create_timestamped_output_dir('pipeline')
+
+observation.debug_output_dir = output_dir
 
 debug_alignment = True
 if debug_alignment and observation.align_by_content:

@@ -1,6 +1,5 @@
 import math
 import zwoasi
-import simpleaudio
 
 
 #import glumpy
@@ -17,7 +16,6 @@ import numpy as np
 import tensorez.luckiness
 import tensorez.util
 import tensorflow as tf
-import tensorflow_graphics as tfg
 import os
 import gc
 
@@ -61,7 +59,7 @@ def process_frame(raw_frame_hw, luckiness_cache, luckiness_kwargs, downsample = 
         white = frame[:, :, :, 0]
         pygame_frame_whc = tf.stack([white, white, white], axis = -1)
     # tf function doesn't like.  need to upgrade tensorflow to avoid this, but that means i need to install linux inside windows and jesus christ
-    #pygame_frame_whc = tfg.image.color_space.srgb.from_linear_rgb(pygame_frame_whc)
+    pygame_frame_whc = tensorez.util.convert_linear_to_srgb(pygame_frame_whc)
     pygame_frame_whc *= 255.0
     pygame_frame_whc = tf.cast(pygame_frame_whc, tf.uint8)
     pygame_frame_whc = tf.squeeze(pygame_frame_whc, axis = 0)

@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-import tensorflow_graphics as tfg
 
 from tensorez.util import *
 from tensorez.bayer import *
@@ -57,7 +56,7 @@ class TensoRezModel(tf.keras.Model):
 
             self.adc_function_linear = adc_guess
             
-            adc_guess = tfg.image.color_space.linear_rgb.from_srgb(adc_guess)
+            adc_guess = convert_srgb_to_linear(adc_guess)
             self.adc_function_srgb = adc_guess
                     
             self.adc_function = tf.Variable(adc_guess, name = "adc_function")

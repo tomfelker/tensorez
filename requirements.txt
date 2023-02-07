@@ -1,6 +1,9 @@
 numpy
-tensorflow-gpu
-tensorflow-graphics-gpu
+tensorflow
+tensorstore
 Pillow
 rawpy
-matplotlib.pyplot
+matplotlib
+zwoasi
+pygame
+

@@ -78,12 +78,12 @@ output_dir = create_timestamped_output_dir('local_align')
 
 
 #tf.config.run_functions_eagerly(True)
-observation.debug_frame_limit = 500
+observation.debug_frame_limit = 5
 
 local_align(
     lights=observation,
     flow_dataset_path = os.path.join(output_dir, 'flow_dataset'),
     debug_output_dir = output_dir,
-    max_steps=200
+    max_steps=100
 )
 
