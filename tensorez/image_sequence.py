@@ -22,6 +22,7 @@ class ImageSequence:
         filenames = []
         for fileglob in fileglobs:
             for filename in glob.glob(fileglob):
+                print(f"adding {filename}")
                 filenames.append(filename)
 
         self.filenames_and_raw_start_frames = []
@@ -89,7 +90,7 @@ class ImageSequence:
 
     @staticmethod
     def get_frame_count(filename):
-        if fnmatch.fnmatch(filename, '*.ser'):
+        if fnmatch.fnmatch(filename.lower(), '*.ser'):
             ser_header = ser_format.read_ser_header(filename)
             return ser_header.frame_count
         # todo: other video types?

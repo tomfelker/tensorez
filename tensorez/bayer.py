@@ -24,8 +24,8 @@ def apply_demosaic_filter(bayer_filtered_image, demosaic_kernels):
 
     # using reflect padding is only correct for a kernel size of 2,
     # and odd-sized demosaic kernels would probably at least require uneven padding
-    assert(bayer_height == 2 and bayer_width == 2)
-    assert(kernel_height % 2 == 1 and kernel_width % 2 == 1)
+    assert bayer_height == 2 and bayer_width == 2
+    assert kernel_height % 2 == 1 and kernel_width % 2 == 1
     bayer_filtered_image_padded = tf.pad(
         bayer_filtered_image,
         paddings = [

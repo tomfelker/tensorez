@@ -185,7 +185,7 @@ def pass_2(lights, luckiness_mean, luckiness_stdev, algorithm, algorithm_cache, 
                     gc.collect()
 
             else:
-                assert(inputspace_weights_bhwc is not None)
+                assert inputspace_weights_bhwc is not None
                 aligned_weights = hwc_to_chw(tensorez.modified_stn.spatial_transformer_network(inputspace_weights_bhwc, theta, low_memory=low_memory))
 
             weight_image *= aligned_weights

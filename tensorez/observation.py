@@ -96,11 +96,13 @@ class Observation:
                 with open(dark_cache_txt_filename, mode='w') as txtfile:
                     txtfile.write(hash_info)
 
-    def load_or_create_alignment_transforms(self):
+    def load_or_create_alignment_transforms(self):        
         if self.alignment_transforms is not None:
             return
         if len(self) <= 1:
+            print("observation has no data, nothing to align.")
             return
+
         if self.align_by_content is False:
             return
         if self.computing_alignment_transforms is True:
@@ -214,7 +216,7 @@ class Observation:
 
         # sigh, this is getting ugly...
         if not self.crop_before_align and not self.crop_before_content_align and self.crop is not None:
-            assert(not skip_content_align)
+            assert not skip_content_align
             image = crop_image(image, crop=self.crop, crop_align=self.crop_align)
             if dark_variance is not None:
                 dark_variance = crop_image(dark_variance, crop=self.crop, crop_align=self.crop_align)
@@ -226,11 +228,11 @@ class Observation:
     def read_bayer_filter_unaligned(self):
         bayer_filter = self.lights.read_bayer_filter()
         if self.align_by_center_of_mass:
-            assert(self.align_by_center_of_mass_only_even_shifts, 'When doing Bayer processing, you must set align_by_center_of_mass_only_even_shifts, so that the bayer patterns of all images will line up.  You may also want to align_by_content in this case.')
+            assert self.align_by_center_of_mass_only_even_shifts, 'When doing Bayer processing, you must set align_by_center_of_mass_only_even_shifts, so that the bayer patterns of all images will line up.  You may also want to align_by_content in this case.'
         if self.crop is not None:
             # This may not be strictly necessary, but it keeps things simple... otherwise if we decompose
             # the image into bayer channels, different crops would have different bayer patterns.
-            assert(self.crop_align == 2)
+            assert self.crop_align == 2
             bayer_filter = crop_image(bayer_filter, crop=self.crop, crop_align=self.crop_align)
         return bayer_filter
 

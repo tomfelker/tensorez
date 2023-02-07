@@ -230,7 +230,7 @@ class LuckinessAlgorithmFourierFocus:
 
 def spatial_to_frequency_domain(spatial_domain_image_chw):
     # even sizes please, or else we'd have to keep track of dimension when going the other way
-    assert(spatial_domain_image_chw.shape[-1] % 2 == 0)
+    assert spatial_domain_image_chw.shape[-1] % 2 == 0
 
     frequency_domain_image_chw_complex = tf.signal.rfft2d(spatial_domain_image_chw)
     return frequency_domain_image_chw_complex

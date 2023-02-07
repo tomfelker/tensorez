@@ -106,7 +106,7 @@ def crop_image(image, crop, crop_align, crop_offsets = None, crop_center = None)
 
 def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, crop_align = 2, crop_offsets = None, crop_center = None, color_balance = True, demosaic = True, frame_index = None, discard_alpha = True):
     #print("Reading", filename, "frame " + str(frame_index) if frame_index is not None else "")
-    if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
+    if fnmatch.fnmatch(filename.lower(), '*.tif') or fnmatch.fnmatch(filename.lower(), '*.tiff'):
         image = Image.open(filename)        
         image = np.array(image)
         if to_float:
@@ -115,7 +115,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
             if srgb_to_linear:
                 image = convert_srgb_to_linear(image)
 
-    elif fnmatch.fnmatch(filename, '*.cr2'):
+    elif fnmatch.fnmatch(filename.lower(), '*.cr2'):
         # For raw files, we will read them into a full color image, but with the bayer pattern... this way,
         # we can easily handle whatever bayer pattern
 
@@ -161,7 +161,7 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
                 if demosaic:
                     image = apply_demosaic_filter(image, demosaic_kernels_rggb)
 
-    elif fnmatch.fnmatch(filename, '*.ser'):
+    elif fnmatch.fnmatch(filename.lower(), '*.ser'):
         image, header = ser_format.read_frame(filename, frame_index = frame_index, to_float = to_float)
         if demosaic:
             if header.color_id == ser_format.ColorId.MONO:
@@ -193,10 +193,10 @@ def read_image(filename, to_float = True, srgb_to_linear = True, crop = None, cr
     return image
 
 def read_bayer_filter(filename):
-    if fnmatch.fnmatch(filename, '*.tif') or fnmatch.fnmatch(filename, '*.tiff'):
+    if fnmatch.fnmatch(filename.lower(), '*.tif') or fnmatch.fnmatch(filename.lower(), '*.tiff'):
         return tf.ones(shape = (1, 1, 1, 1))
 
-    elif fnmatch.fnmatch(filename, '*.cr2'):
+    elif fnmatch.fnmatch(filename.lower(), '*.cr2'):
         with rawpy.imread(filename) as raw:
             height = raw.raw_image_visible.shape[-2]
             width = raw.raw_image_visible.shape[-1]
@@ -206,7 +206,7 @@ def read_bayer_filter(filename):
                 chr(raw.color_desc[raw.raw_pattern[1,0]]) == 'G' and
                 chr(raw.color_desc[raw.raw_pattern[1,1]]) == 'B'):
                 return tf.expand_dims(tf.tile(bayer_filter_tile_rggb, multiples = (height // 2, width // 2, 1)), axis = 0)
-    elif fnmatch.fnmatch(filename, '*.ser'):
+    elif fnmatch.fnmatch(filename.lower(), '*.ser'):
         image, header = ser_format.read_frame(filename, frame_index = 0, to_float = False)
         if header.color_id == ser_format.ColorId.MONO:
             return tf.ones(shape = (1, 1, 1, 1))
@@ -230,7 +230,7 @@ class ImageSequenceReader:
     def __iter__(self):
         self.current_frame_index = self.skip
         self.num_frames = 1
-        if fnmatch.fnmatch(self.filename, '*.ser'):
+        if fnmatch.fnmatch(self.filename.lower(), '*.ser'):
             ser_header = ser_format.read_ser_header(self.filename)
             self.num_frames = ser_header.frame_count
         return self

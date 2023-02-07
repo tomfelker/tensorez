@@ -6,4 +6,5 @@ rawpy
 matplotlib
 zwoasi
 pygame
+tee
 

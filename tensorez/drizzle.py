@@ -93,7 +93,7 @@ def drizzle(input_image_bhwc, theta, upscale = 2, pixfrac = .5, out_shape_hw=Non
         out_h = in_h * upscale
         out_w = in_w * upscale
     else:
-        assert(upscale is None)
+        assert upscale is None
         out_h = out_shape_hw[0]
         out_w = out_shape_hw[1]
     
