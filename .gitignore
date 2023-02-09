@@ -18,6 +18,8 @@ gallery/**
 obd/**
 output/*
 **/tensorez_cache/**
+cache/**
+cache
 **/__pycache__/*
 *.zip
 *.pdf

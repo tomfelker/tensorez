@@ -30,6 +30,8 @@ class Observation:
 
         self.computing_alignment_transforms = False
 
+        self.cache_dir = 'cache'
+
         self.debug_output_dir = None
 
         # this should be all things that might affect the result, for use in logs and such so we can recreate things
@@ -57,7 +59,7 @@ class Observation:
                 hash_info = self.darks.get_cache_hash_info()
                 hash = hashlib.sha256(repr(hash_info).encode('utf-8')).hexdigest()
 
-                dir = os.path.join(os.path.dirname(self.darks.filenames_and_raw_start_frames[0][0]), 'tensorez_cache', hash)
+                dir = os.path.join(self.cache_dir, 'darks', hash)
                 os.makedirs(dir, exist_ok=True)
 
                 basename = 'dark_cache'
@@ -126,7 +128,7 @@ class Observation:
 
         hash = hashlib.sha256(repr(hash_info).encode('utf-8')).hexdigest()
         
-        dir = os.path.join(os.path.dirname(self.lights.filenames_and_raw_start_frames[0][0]), 'tensorez_cache', hash)
+        dir = os.path.join(self.cache_dir, 'alignments', hash)
         os.makedirs(dir, exist_ok=True)
 
         basename = 'alignment_transforms'
