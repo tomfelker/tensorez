@@ -46,7 +46,6 @@ def local_lucky(
     algorithm,
     algorithm_kwargs,
     average_image = None,
-    dark_variance = None,
     steepness = 3,
     stdevs_above_mean = 3,
     debug_output_dir = None,

@@ -7,6 +7,7 @@ import tensorflow as tf
 import os.path
 import tensorez.align as align
 from tensorez.local_lucky import *
+from tensorez.local_lucky_precise import *
 from tensorez.observation import *
 from tensorez.util import *
 from tensorez.image_sequence import *
@@ -14,12 +15,20 @@ from tensorez.align import *
 
 import matplotlib.pyplot as plt
 
+#observation = Observation(
+#    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step=1, end_frame=501),
+#    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER')),
+#    align_by_content=True,
+#    local_align=True
+#    #compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
+#)
+
 observation = Observation(
-    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'lights', '*.SER'), frame_step=1, end_frame=501),
-    darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'moon_prime', 'darks', '*.SER')),
+    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER'), frame_step=200),
+    darks = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', 'darks', '*.SER')),
     align_by_content=True,
-    local_align=True
-    #compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
+    local_align=True,
+    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'flow_regularization_loss': 1e-5}
 )
 
 #observation = Observation(
@@ -111,7 +120,8 @@ for step in range(steps):
     else:
         step_output_dir = output_dir
 
-    known_image = local_lucky(
+
+    known_image = local_lucky_precise(
         observation,
         
         #algorithm = LuckinessAlgorithmLowpassAbsBandpass,
@@ -131,14 +141,16 @@ for step in range(steps):
         #algorithm = LuckinessAlgorithmImageSquared,
         #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
 
-        stdevs_above_mean = 3,
-        steepness=3,
+        #stdevs_above_mean = 3,
+        #steepness=3,
         debug_output_dir=step_output_dir,    
-        bayer=True,
-        drizzle=False,
-        drizzle_kwargs={'upscale': 3, 'supersample': 4},
+        #bayer=True,
+        #drizzle=False,
+        #drizzle_kwargs={'upscale': 3, 'supersample': 4},
         average_image=known_image,
-        low_memory=True
+        #low_memory=True
     )
 
-    write_image(known_image, os.path.join(output_dir, f'local_lucky_step_{step}.png'))
+        
+
+    write_image(known_image, os.path.join(output_dir, f'local_lucky_precise_step_{step}.png'))

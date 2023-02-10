@@ -3,6 +3,7 @@ import tensorstore as ts
 import tensorez.modified_stn as stn
 import os
 import os.path
+import gc
 
 from tensorez.util import *
 from tensorez.luckiness import *
@@ -142,6 +143,7 @@ def local_align(
 
     
     for image_index, middleward_index in middle_out(target_image_index, len(lights)):
+        gc.collect()
         image_bhwc = lights[image_index]
 
         if debug_output_dir is not None:
@@ -156,6 +158,7 @@ def local_align(
             alignment_transforms[image_index, :].assign(alignment_transforms[middleward_index, :])
 
         for lod in range(num_lods - 1, skip_lods - 1, -1):
+            gc.collect()
 
             lod_downsample_factor = pow(lod_factor, lod)
             lod_image_shape_hw = [int(image_shape_hw[0] // lod_downsample_factor // 2) * 2, int(image_shape_hw[1] // lod_downsample_factor // 2) * 2]
@@ -212,7 +215,8 @@ def local_align(
                 flow.assign(upscaled_flow)
             prev_flow = flow
 
-            print(f'Aligning image {image_index + 1} of {len(lights)}, lod {num_lods - lod} of {num_lods - skip_lods}')
+            debug_string = f'Aligning image {image_index + 1} of {len(lights)}, lod {num_lods - lod} of {num_lods - skip_lods}'
+            print(debug_string)
             
             
 
@@ -228,7 +232,9 @@ def local_align(
                 flow_learning_rate=flow_learning_rate,
                 flow_max_update=flow_max_update,
                 flow_regularization_loss=flow_regularization_loss,
-                max_steps = tf.constant(max_steps, dtype=tf.int32)
+                max_steps = tf.constant(max_steps, dtype=tf.int32),
+                debug_string=tf.constant(debug_string)
+
             )
 
             alignment_transforms[image_index, :].assign(new_alignment_transform)
@@ -333,7 +339,7 @@ def write_flow_image(flow_bihw, filename, flow_scale = 100, style = 'rg', **writ
 
 # can't be function because optimizer creates variables - even passing it in didn't help.
 #@tf.function#(jit_compile=False)
-def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, transform_learning_rate, transform_max_update, flow_learning_rate, flow_max_update, flow_regularization_loss, max_steps):
+def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, transform_learning_rate, transform_max_update, flow_learning_rate, flow_max_update, flow_regularization_loss, max_steps, debug_string):
 
     # for Adam, need to nerf learning rate a lot or it way overshoots on the first update
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
@@ -358,7 +364,7 @@ def local_align_training_loop(image_bhwc, alignment_transform, flow, target_imag
         #flow_update = tf.clip_by_value(flow_update, -flow_max_update, flow_max_update)
         #flow -= flow_update
 
-        tf.print("loss:", loss, "after step", step, "of", max_steps, output_stream=sys.stdout)
+        tf.print(debug_string, "loss:", loss, "after step", step, "of", max_steps, output_stream=sys.stdout)
 
     return alignment_transform, flow
 
