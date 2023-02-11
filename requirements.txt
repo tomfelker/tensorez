@@ -1,6 +1,5 @@
 numpy
 tensorflow
-tensorstore
 Pillow
 rawpy
 matplotlib

@@ -16,7 +16,7 @@ contain more information than the average frame at high frequencies.  We can
 use some FFT magic and hand waving to compute this.
 
 To strictly choose from the best N frames, we would need to remember N
-luckinesses and frame indices.  So we'll do that, with tensorstore and memory caching.
+luckinesses and frame indices.  So we'll do that, with mmap and memory caching.
 
 
 
@@ -24,8 +24,6 @@ luckinesses and frame indices.  So we'll do that, with tensorstore and memory ca
 
 
 import tensorflow as tf
-import tensorstore as ts
-
 
 import os
 from tensorez.util import *
@@ -53,12 +51,8 @@ def reduce_mean_by_top_k_scores(values, scores, k):
     # So instead: if there are such ties, than all such values will still be
     # averaged, with the divisor adjusted appropriately.
 
-    if isinstance(scores, ts.TensorStore):
-        scores_dtype = tf.as_dtype(scores.dtype.name)
-        top_scores_shape = list(scores.shape)        
-    else:
-        scores_dtype = tf.as_dtype(scores.dtype)
-        top_scores_shape = scores.shape.as_list()
+    scores_dtype = tf.as_dtype(scores.dtype)
+    top_scores_shape = scores.shape.as_list()
     top_scores_shape[0] = 1
     top_scores_shape.append(k)
 
@@ -73,18 +67,14 @@ def reduce_mean_by_top_k_scores(values, scores, k):
     lowest_score_to_average = top_scores[..., 1]
     del top_scores
 
-    if isinstance(scores, ts.TensorStore):
-        num_values_shape = list(scores.shape)
-    else:
-        num_values_shape = scores.shape.as_list()
+    num_values_shape = scores.shape.as_list()
     num_values_shape[0] = 1
     num_values = tf.Variable(initial_value=tf.zeros(shape=num_values_shape, dtype=scores_dtype))
-    if isinstance(values, ts.TensorStore):
-        average_dtype = tf.as_dtype(values.dtype.name)
-        average_shape = list(values.shape)        
-    else:
-        average_shape = values.shape.as_list()
+    
+    average_dtype = tf.as_dtype(average.dtype)
+    average_shape = values.shape.as_list()
     average_shape[0] = 1
+
     average = tf.Variable(initial_value=tf.zeros(shape=average_shape, dtype=average_dtype))
 
     for batch_index in range(batch_size):
@@ -169,19 +159,12 @@ def local_lucky_precise(
         # todo: fancy upscaling?
       
         if image_store_bhwc is None:
-            image_store_bhwc = ts.open({
-                'driver': 'n5',
-                'kvstore': {
-                    'driver': 'file',
-                    'path': os.path.join(cache_dir, 'image_store_bhwc'),
-                },
-                'metadata': {
-                    'dataType': 'float32',
-                    'dimensions': (len(lights), image.shape[-3], image.shape[-2], image.shape[-1]),
-                },
-                'create': True,
-                'delete_existing': True,
-            }).result()
+            image_store_bhwc = np.lib.format.open_memmap(
+                filename=os.path.join(cache_dir, 'image_store_bhwc.npy'),
+                mode='w',
+                dtype=np.float32,
+                shape=(len(lights), image.shape[-3], image.shape[-2], image.shape[-1]),
+            )                
 
         image_store_bhwc[image_index : image_index + 1, :, :, :] = image
         
@@ -199,20 +182,12 @@ def local_lucky_precise(
                 write_image(bchw_to_bhwc(debug_image), os.path.join(debug_output_dir, f"{debug_image_name}_{image_index:08d}.png"))
 
         if luckiness_store_bhwc is None:
-            luckiness_store_bhwc = ts.open({
-                'driver': 'n5',
-                'kvstore': {
-                    'driver': 'file',
-                    'path': os.path.join(cache_dir, 'luckiness_store_bhwc'),
-                },
-                'metadata': {
-                    'dataType': 'float32',
-                    'dimensions': (len(lights), luckiness_bchw.shape[-2], luckiness_bchw.shape[-1], luckiness_bchw.shape[-3]),
-                },
-                'create': True,
-                'delete_existing': True,
-            }).result()
-
+            luckiness_store_bhwc = np.lib.format.open_memmap(
+                filename=os.path.join(cache_dir, 'luckiness_store_bhwc.npy'),
+                mode='w',
+                dtype=np.float32,
+                shape=(len(lights), luckiness_bchw.shape[-2], luckiness_bchw.shape[-1], luckiness_bchw.shape[-3]),
+            )
 
         gc.collect()
         luckiness_store_bhwc[image_index : image_index + 1, :, :, :] = bchw_to_bhwc(luckiness_bchw)
