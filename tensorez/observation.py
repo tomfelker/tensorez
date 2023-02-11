@@ -2,7 +2,6 @@ import tensorez.align as align
 import tensorez.local_align as local_align
 from tensorez.util import *
 import tensorflow as tf
-import tensorstore as ts
 import hashlib
 import os.path
 import numpy as np
@@ -138,18 +137,15 @@ class Observation:
         alignment_cache_txt_filename = os.path.join(dir, basename_txt)
 
         if self.local_align:
-            local_alignment_dataset_dir = os.path.join(dir, 'flow_dataset')
+            flow_dataset_filename=os.path.join(dir, 'flow_dataset.npy')
 
         try:            
             self.alignment_transforms = np.load(alignment_cache_npy_filename)
             if self.local_align:
-                self.local_alignment_dataset = ts.open(open=True, read=True, create=False, write=False, spec={
-                    'driver': 'n5',
-                    'kvstore': {
-                        'driver': 'file',
-                        'path': local_alignment_dataset_dir,
-                    },
-                }).result()
+                self.local_alignment_dataset = np.lib.format.open_memmap(
+                    filename=flow_dataset_filename,
+                    mode='r',
+                )
 
             print(f"Loaded alignment transforms from '{alignment_cache_npy_filename}'.")
             return
@@ -160,7 +156,7 @@ class Observation:
             # we're passing ourselves in (so that the compute process can have the dark images subtracted, but we need to avoid infinite recursion
             self.computing_alignment_transforms = True            
             if self.local_align:
-                self.alignment_transforms, self.local_alignment_dataset = local_align.local_align(lights = self, flow_dataset_path=local_alignment_dataset_dir, debug_output_dir=self.debug_output_dir, **self.compute_alignment_transforms_kwargs)                
+                self.alignment_transforms, self.local_alignment_dataset = local_align.local_align(lights = self, flow_dataset_filename=flow_dataset_filename, debug_output_dir=self.debug_output_dir, **self.compute_alignment_transforms_kwargs)                
                 # the dataset dir is already written to at this point, but we'll save the alignment transforms below, and won't consider
                 # things done until that point.  that gives a weak facsimile of atomicity
             else:

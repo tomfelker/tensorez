@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorstore as ts
 import tensorez.modified_stn as stn
 import os
 import os.path
@@ -25,7 +24,7 @@ def local_align(
     # an iterable yielding the images to align
     lights,
     # we will write the alignment info in here
-    flow_dataset_path,
+    flow_dataset_filename,
     # the index of the lights image to align everything else with (default is the middle of the array)
     target_image_index = None,    
     # if not none, we will dump a bunch of debug images here
@@ -81,21 +80,11 @@ def local_align(
     image_shape_hw = image_shape.as_list()[-3:-1]
     flow_shape_hw = [int(image_shape_hw[0] // flow_downsample // 2) * 2, int(image_shape_hw[1] // flow_downsample // 2) * 2]
 
-    flow_dataset = ts.open({
-        'driver': 'n5',
-        'kvstore': {
-            'driver': 'file',
-            'path': flow_dataset_path,
-        },
-        'metadata': {
-            'dataType': 'float32',
-            'dimensions': (len(lights), 2, flow_shape_hw[0], flow_shape_hw[1]),
-        },
-        'create': True,
-        'delete_existing': True,
-    }).result()
-
-
+    flow_dataset = np.lib.format.open_memmap(
+        filename=flow_dataset_filename,
+        mode='w+',
+        shape=(len(lights), 2, flow_shape_hw[0], flow_shape_hw[1])
+    )
 
     mask_image = generate_mask_image(image_shape)
 
@@ -314,13 +303,13 @@ def local_align(
     return alignment_transforms, flow_dataset
 
 def write_flow_image(flow_bihw, filename, flow_scale = 100, style = 'rg', **write_image_kwargs):
-    if style is 'rg':
+    if style == 'rg':
         flow_image = tf.transpose(flow_bihw, perm=(0,2,3,1))
         flow_image = tf.concat([flow_image, tf.zeros(shape = (1,flow_image.shape[1], flow_image.shape[2], 1))], axis=-1)
         flow_image *= flow_scale
         flow_image += 0.5    
         write_image(flow_image, filename, saturate = True, **write_image_kwargs)
-    if style is 'hsv_dark' or style is 'hsv_bright':
+    if style == 'hsv_dark' or style == 'hsv_bright':
         flow_bhwi = tf.transpose(flow_bihw, perm=(0,2,3,1))
         flow_mag = tf.sqrt(tf.square(flow_bhwi[..., 0]), tf.square(flow_bhwi[...,1]))
         flow_theta = tf.atan2(flow_bhwi[..., 1], flow_bhwi[..., 0])
