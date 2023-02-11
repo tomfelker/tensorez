@@ -24,11 +24,11 @@ import matplotlib.pyplot as plt
 #)
 
 observation = Observation(
-    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER'), frame_step=200),
+    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER'), frame_step=10),
     darks = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', 'darks', '*.SER')),
     align_by_content=True,
     local_align=True,
-    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'flow_regularization_loss': 1e-5}
+    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'flow_regularization_loss': 1e-5, 'max_steps' : 200}
 )
 
 #observation = Observation(
@@ -141,8 +141,14 @@ for step in range(steps):
         #algorithm = LuckinessAlgorithmImageSquared,
         #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
 
+        # for the local_lucky() (kinda softmaxy)
         #stdevs_above_mean = 3,
         #steepness=3,
+
+        # for local_lucky_precise():
+        top_fraction = .05,
+
+
         debug_output_dir=step_output_dir,    
         #bayer=True,
         #drizzle=False,

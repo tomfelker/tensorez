@@ -67,9 +67,10 @@ def reduce_mean_by_top_k_scores(values, scores, k):
     batch_size = values.shape[0]
 
     for batch_index in range(batch_size):
+        print(f"reduce_mean_by_top_k_scores() pass 1 image {batch_index+1} of {batch_size}")
         _reduce_mean_by_top_k_scores_pass_1_body(top_scores, scores[batch_index : batch_index + 1, ...])
 
-    lowest_score_to_average = top_scores[..., 0]
+    lowest_score_to_average = top_scores[..., 1]
     del top_scores
 
     if isinstance(scores, ts.TensorStore):
@@ -87,6 +88,7 @@ def reduce_mean_by_top_k_scores(values, scores, k):
     average = tf.Variable(initial_value=tf.zeros(shape=average_shape, dtype=average_dtype))
 
     for batch_index in range(batch_size):
+        print(f"reduce_mean_by_top_k_scores() pass 2 image {batch_index+1} of {batch_size}")
         _reduce_mean_by_top_k_scores_pass_2_body(scores[batch_index : batch_index + 1, ...], values[batch_index : batch_index + 1, ...], lowest_score_to_average, average, num_values)
 
     average.assign(tf.math.divide_no_nan(average, num_values))
@@ -96,9 +98,7 @@ def reduce_mean_by_top_k_scores(values, scores, k):
 
 @tf.function(jit_compile=True)
 def _reduce_mean_by_top_k_scores_pass_1_body(top_scores, score):
-    # sigh...
     top_scores[..., 0].assign(score)
-    #top_scores.assign(tf.concat([score, top_scores[..., 0]], axis=0))
 
     top_scores.assign(tf.sort(top_scores, axis=-1))
 
@@ -161,6 +161,8 @@ def local_lucky_precise(
     luckiness_store_bhwc = None
     
     for image_index in range(len(lights)):
+        print(f"Computing luckiness for image {image_index+1} of {len(lights)}")
+
         image, dark_variance = lights.read_cooked_image(image_index, want_dark_variance=True)
   
         # todo: fancy upscaling?
@@ -211,15 +213,16 @@ def local_lucky_precise(
             }).result()
 
 
-
+        gc.collect()
         luckiness_store_bhwc[image_index : image_index + 1, :, :, :] = bchw_to_bhwc(luckiness_bchw)
 
     gc.collect()
 
+    print(f"Collecting top {top_k}")
     lucky_image_bhwc = reduce_mean_by_top_k_scores(image_store_bhwc, luckiness_store_bhwc, top_k)
 
     if debug_output_dir is not None:
-        write_image(lucky_image_bhwc, os.path.join(debug_output_dir, 'aa_lucky_image.png'))
+        write_image(lucky_image_bhwc, os.path.join(debug_output_dir, f'aa_lucky_image_top_{top_k}_of_{len(lights)}.png'))
 
     return lucky_image_bhwc
 
