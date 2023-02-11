@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorstore as ts
 import tensorez.modified_stn as stn
 import os
 import os.path
@@ -25,7 +24,7 @@ def local_align(
     # an iterable yielding the images to align
     lights,
     # we will write the alignment info in here
-    flow_dataset_path,
+    flow_dataset_filename,
     # the index of the lights image to align everything else with (default is the middle of the array)
     target_image_index = None,    
     # if not none, we will dump a bunch of debug images here
@@ -53,16 +52,16 @@ def local_align(
 
     flow_regularization_loss = 1e-6,
     # number of learning stetps per lod
-    max_steps = 100,
+    max_steps = 500,
     # number of high lods to skip
     skip_lods = 0,
     # we start with low resolution images (LOD = level of detail) and step up to the full resolution image, each step increases resolution by this factor
-    lod_factor = math.sqrt(2),
-    flow_downsample = 8,
+    lod_factor = 2,
+    flow_downsample = 4,
     # the smallest lod is at least this big
     min_size = 32,
     # we blur the target images by this many pixels, to provide slopes to allow the images to roll into place
-    blur_pixels = 8,
+    blur_pixels = 4,
     # if true, after aligning each image, we add it into our target - could help if each image is bad, but could also add error
     incrementally_improve_target_image = False,
     allow_rotation = True,
@@ -81,21 +80,12 @@ def local_align(
     image_shape_hw = image_shape.as_list()[-3:-1]
     flow_shape_hw = [int(image_shape_hw[0] // flow_downsample // 2) * 2, int(image_shape_hw[1] // flow_downsample // 2) * 2]
 
-    flow_dataset = ts.open({
-        'driver': 'n5',
-        'kvstore': {
-            'driver': 'file',
-            'path': flow_dataset_path,
-        },
-        'metadata': {
-            'dataType': 'float32',
-            'dimensions': (len(lights), 2, flow_shape_hw[0], flow_shape_hw[1]),
-        },
-        'create': True,
-        'delete_existing': True,
-    }).result()
-
-
+    flow_dataset = np.lib.format.open_memmap(
+        filename=flow_dataset_filename,
+        mode='w+',
+        dtype=np.float32,
+        shape=(len(lights), 2, flow_shape_hw[0], flow_shape_hw[1])
+    )
 
     mask_image = generate_mask_image(image_shape)
 
@@ -141,7 +131,7 @@ def local_align(
     target_image = tf.Variable(lights[target_image_index])    
     target_image.assign(image_with_zero_mean_and_unit_variance(target_image))
 
-    
+    average_final_highest_lod_loss = 0
     for image_index, middleward_index in middle_out(target_image_index, len(lights)):
         gc.collect()
         image_bhwc = lights[image_index]
@@ -154,8 +144,7 @@ def local_align(
         prev_flow = None
 
         # todo: could do some exponential moving average momentum thingy here
-        if image_index > 0:
-            alignment_transforms[image_index, :].assign(alignment_transforms[middleward_index, :])
+        alignment_transforms[image_index, :].assign(alignment_transforms[middleward_index, :])
 
         for lod in range(num_lods - 1, skip_lods - 1, -1):
             gc.collect()
@@ -220,7 +209,7 @@ def local_align(
             
             
 
-            new_alignment_transform, new_flow = local_align_training_loop(
+            new_alignment_transform, new_flow, final_loss = local_align_training_loop(
                 lod_image,
                 # it doesn't seem to like using a slice of a variable, so need to make a new one
                 alignment_transform=tf.Variable(alignment_transforms[image_index, :]),
@@ -239,8 +228,6 @@ def local_align(
 
             alignment_transforms[image_index, :].assign(new_alignment_transform)
             flow.assign(new_flow)
-            
-                
 
         aligned_normalized_image = None
         if incrementally_improve_target_image or (debug_output_dir is not None):
@@ -259,6 +246,8 @@ def local_align(
 
         # store it to the disk - magic!
         flow_dataset[image_index:image_index+1, :, :, :] = flow
+
+        average_final_highest_lod_loss += final_loss   
 
         if debug_output_dir is not None:            
             write_image(local_aligned, os.path.join(debug_output_dir, f"local_aligned_{image_index:08d}.png"), normalize = True)
@@ -315,13 +304,13 @@ def local_align(
     return alignment_transforms, flow_dataset
 
 def write_flow_image(flow_bihw, filename, flow_scale = 100, style = 'rg', **write_image_kwargs):
-    if style is 'rg':
+    if style == 'rg':
         flow_image = tf.transpose(flow_bihw, perm=(0,2,3,1))
         flow_image = tf.concat([flow_image, tf.zeros(shape = (1,flow_image.shape[1], flow_image.shape[2], 1))], axis=-1)
         flow_image *= flow_scale
         flow_image += 0.5    
         write_image(flow_image, filename, saturate = True, **write_image_kwargs)
-    if style is 'hsv_dark' or style is 'hsv_bright':
+    if style == 'hsv_dark' or style == 'hsv_bright':
         flow_bhwi = tf.transpose(flow_bihw, perm=(0,2,3,1))
         flow_mag = tf.sqrt(tf.square(flow_bhwi[..., 0]), tf.square(flow_bhwi[...,1]))
         flow_theta = tf.atan2(flow_bhwi[..., 1], flow_bhwi[..., 0])
@@ -342,7 +331,13 @@ def write_flow_image(flow_bihw, filename, flow_scale = 100, style = 'rg', **writ
 def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, transform_learning_rate, transform_max_update, flow_learning_rate, flow_max_update, flow_regularization_loss, max_steps, debug_string):
 
     # for Adam, need to nerf learning rate a lot or it way overshoots on the first update
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
+    #optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
+    
+    # This one jiggles a lot!
+    #optimizer = tf.keras.optimizers.RMSprop()
+
+    # everyone says this is the coolest:
+    optimizer = tf.keras.optimizers.Nadam(learning_rate=0.0001)
 
     for step in range(max_steps):
         variables = [alignment_transform, flow]
@@ -366,7 +361,7 @@ def local_align_training_loop(image_bhwc, alignment_transform, flow, target_imag
 
         tf.print(debug_string, "loss:", loss, "after step", step, "of", max_steps, output_stream=sys.stdout)
 
-    return alignment_transform, flow
+    return alignment_transform, flow, loss
 
 # alignment_transform's last index is [delta_x, delta_y, theta_radians, log_scale_x, log_scale_y, skew_x]
 @tf.function(jit_compile=False)
