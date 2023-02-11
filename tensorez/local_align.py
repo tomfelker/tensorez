@@ -53,16 +53,16 @@ def local_align(
 
     flow_regularization_loss = 1e-6,
     # number of learning stetps per lod
-    max_steps = 100,
+    max_steps = 500,
     # number of high lods to skip
     skip_lods = 0,
     # we start with low resolution images (LOD = level of detail) and step up to the full resolution image, each step increases resolution by this factor
-    lod_factor = math.sqrt(2),
-    flow_downsample = 8,
+    lod_factor = 2,
+    flow_downsample = 4,
     # the smallest lod is at least this big
     min_size = 32,
     # we blur the target images by this many pixels, to provide slopes to allow the images to roll into place
-    blur_pixels = 8,
+    blur_pixels = 4,
     # if true, after aligning each image, we add it into our target - could help if each image is bad, but could also add error
     incrementally_improve_target_image = False,
     allow_rotation = True,
@@ -141,7 +141,7 @@ def local_align(
     target_image = tf.Variable(lights[target_image_index])    
     target_image.assign(image_with_zero_mean_and_unit_variance(target_image))
 
-    
+    average_final_highest_lod_loss = 0
     for image_index, middleward_index in middle_out(target_image_index, len(lights)):
         gc.collect()
         image_bhwc = lights[image_index]
@@ -154,8 +154,7 @@ def local_align(
         prev_flow = None
 
         # todo: could do some exponential moving average momentum thingy here
-        if image_index > 0:
-            alignment_transforms[image_index, :].assign(alignment_transforms[middleward_index, :])
+        alignment_transforms[image_index, :].assign(alignment_transforms[middleward_index, :])
 
         for lod in range(num_lods - 1, skip_lods - 1, -1):
             gc.collect()
@@ -220,7 +219,7 @@ def local_align(
             
             
 
-            new_alignment_transform, new_flow = local_align_training_loop(
+            new_alignment_transform, new_flow, final_loss = local_align_training_loop(
                 lod_image,
                 # it doesn't seem to like using a slice of a variable, so need to make a new one
                 alignment_transform=tf.Variable(alignment_transforms[image_index, :]),
@@ -239,8 +238,6 @@ def local_align(
 
             alignment_transforms[image_index, :].assign(new_alignment_transform)
             flow.assign(new_flow)
-            
-                
 
         aligned_normalized_image = None
         if incrementally_improve_target_image or (debug_output_dir is not None):
@@ -259,6 +256,8 @@ def local_align(
 
         # store it to the disk - magic!
         flow_dataset[image_index:image_index+1, :, :, :] = flow
+
+        average_final_highest_lod_loss += final_loss   
 
         if debug_output_dir is not None:            
             write_image(local_aligned, os.path.join(debug_output_dir, f"local_aligned_{image_index:08d}.png"), normalize = True)
@@ -342,7 +341,13 @@ def write_flow_image(flow_bihw, filename, flow_scale = 100, style = 'rg', **writ
 def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, transform_learning_rate, transform_max_update, flow_learning_rate, flow_max_update, flow_regularization_loss, max_steps, debug_string):
 
     # for Adam, need to nerf learning rate a lot or it way overshoots on the first update
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
+    #optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
+    
+    # This one jiggles a lot!
+    #optimizer = tf.keras.optimizers.RMSprop()
+
+    # everyone says this is the coolest:
+    optimizer = tf.keras.optimizers.Nadam(learning_rate=0.0001)
 
     for step in range(max_steps):
         variables = [alignment_transform, flow]
@@ -366,7 +371,7 @@ def local_align_training_loop(image_bhwc, alignment_transform, flow, target_imag
 
         tf.print(debug_string, "loss:", loss, "after step", step, "of", max_steps, output_stream=sys.stdout)
 
-    return alignment_transform, flow
+    return alignment_transform, flow, loss
 
 # alignment_transform's last index is [delta_x, delta_y, theta_radians, log_scale_x, log_scale_y, skew_x]
 @tf.function(jit_compile=False)

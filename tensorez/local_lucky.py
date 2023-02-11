@@ -50,7 +50,7 @@ def local_lucky(
     stdevs_above_mean = 3,
     debug_output_dir = None,
     debug_frames = 10,
-    drizzle = True,
+    drizzle = False,
     drizzle_kwargs = {},
     bayer = True,
     low_memory = False

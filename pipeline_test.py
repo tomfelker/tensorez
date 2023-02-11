@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 #)
 
 observation = Observation(
-    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER'), frame_step=10),
+    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER')),
     darks = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', 'darks', '*.SER')),
     align_by_content=True,
     local_align=True,
@@ -120,8 +120,8 @@ for step in range(steps):
     else:
         step_output_dir = output_dir
 
-
-    known_image = local_lucky_precise(
+    known_image = local_lucky(
+    #known_image = local_lucky_precise(
         observation,
         
         #algorithm = LuckinessAlgorithmLowpassAbsBandpass,
@@ -129,9 +129,9 @@ for step in range(steps):
 
         algorithm=LuckinessAlgorithmFrequencyBands,
         algorithm_kwargs=dict(
-            noise_wavelength_pixels=5,
-            crossover_wavelength_pixels=45,
-            isoplanatic_patch_pixels=65,
+            noise_wavelength_pixels=2,
+            crossover_wavelength_pixels=35,
+            isoplanatic_patch_pixels=55,
             channel_crosstalk = 0,
             ),
 
@@ -142,11 +142,11 @@ for step in range(steps):
         #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
 
         # for the local_lucky() (kinda softmaxy)
-        #stdevs_above_mean = 3,
-        #steepness=3,
+        stdevs_above_mean = 2,
+        steepness=3,
 
         # for local_lucky_precise():
-        top_fraction = .05,
+        #top_fraction = .05,
 
 
         debug_output_dir=step_output_dir,    
