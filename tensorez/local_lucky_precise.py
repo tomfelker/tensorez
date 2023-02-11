@@ -60,7 +60,7 @@ def reduce_mean_by_top_k_scores(values, scores, k):
         scores_dtype = tf.as_dtype(scores.dtype)
         top_scores_shape = scores.shape.as_list()
     top_scores_shape[0] = 1
-    top_scores_shape.append(k + 1)
+    top_scores_shape.append(k)
 
     top_scores = tf.Variable(initial_value=tf.constant(value=scores_dtype.min, shape=top_scores_shape), dtype=scores_dtype)
 
@@ -98,7 +98,8 @@ def reduce_mean_by_top_k_scores(values, scores, k):
 
 @tf.function(jit_compile=True)
 def _reduce_mean_by_top_k_scores_pass_1_body(top_scores, score):
-    top_scores[..., 0].assign(score)
+    lowest_top_score = tf.math.argmin(top_scores, axis=-1, output_type=tf.int32)
+    top_scores.scatter_nd_update(indices=lowest_top_score, updates=score)
 
     top_scores.assign(tf.sort(top_scores, axis=-1))
 
