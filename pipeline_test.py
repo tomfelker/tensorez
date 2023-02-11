@@ -28,7 +28,7 @@ observation = Observation(
     darks = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', 'darks', '*.SER')),
     align_by_content=True,
     local_align=True,
-    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'flow_regularization_loss': 1e-5, 'max_steps' : 200}
+    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'flow_regularization_loss': 1e-5, 'max_steps' : 10, 'lod_factor': 4}
 )
 
 #observation = Observation(
@@ -142,7 +142,7 @@ for step in range(steps):
         #algorithm_kwargs=dict(isoplanatic_patch_pixels=50),
 
         # for the local_lucky() (kinda softmaxy)
-        stdevs_above_mean = 2,
+        stdevs_above_mean = 2.5,
         steepness=3,
 
         # for local_lucky_precise():
