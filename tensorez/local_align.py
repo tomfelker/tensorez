@@ -83,6 +83,7 @@ def local_align(
     flow_dataset = np.lib.format.open_memmap(
         filename=flow_dataset_filename,
         mode='w+',
+        dtype=np.float32,
         shape=(len(lights), 2, flow_shape_hw[0], flow_shape_hw[1])
     )
 
