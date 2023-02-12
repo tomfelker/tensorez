@@ -37,8 +37,12 @@ import tensorez.align
 import tensorez.modified_stn
 from tensorez.luckiness import *
 import gc
+import mmap
 
-
+if getattr(mmap, 'MADV_COLD', None) is None:
+    mmap.MADV_COLD = 20
+if getattr(mmap, 'MADV_PAGEOUT', None) is None:
+    mmap.MADV_PAGEOUT = 21
 
 
 def reduce_mean_by_top_k_scores(values, scores, k):
@@ -52,11 +56,19 @@ def reduce_mean_by_top_k_scores(values, scores, k):
     # averaged, with the divisor adjusted appropriately.
 
     scores_dtype = tf.as_dtype(scores.dtype)
-    top_scores_shape = scores.shape.as_list()
+    top_scores_shape = list(scores.shape)
     top_scores_shape[0] = 1
     top_scores_shape.append(k)
 
-    top_scores = tf.Variable(initial_value=tf.constant(value=scores_dtype.min, shape=top_scores_shape), dtype=scores_dtype)
+    #top_scores = tf.Variable(initial_value=tf.constant(value=scores_dtype.min, shape=top_scores_shape), dtype=scores_dtype)
+
+    # it's important that these values be unique across the last dim, or else pass 1 won't separate them
+    min_score = tf.math.reduce_min(scores[0:k, ...])
+    unique_score_decrements = tf.linspace(start=1.0, stop=2.0, num=k)
+    unique_min_scores = min_score - tf.abs(min_score) * unique_score_decrements
+    unique_min_scores = tf.broadcast_to(unique_min_scores, shape=top_scores_shape)
+    top_scores = tf.Variable(initial_value=unique_min_scores)
+
 
     batch_size = values.shape[0]
 
@@ -64,15 +76,15 @@ def reduce_mean_by_top_k_scores(values, scores, k):
         print(f"reduce_mean_by_top_k_scores() pass 1 image {batch_index+1} of {batch_size}")
         _reduce_mean_by_top_k_scores_pass_1_body(top_scores, scores[batch_index : batch_index + 1, ...])
 
-    lowest_score_to_average = top_scores[..., 1]
+    lowest_score_to_average = tf.math.reduce_min(top_scores, axis=-1)
     del top_scores
 
-    num_values_shape = scores.shape.as_list()
+    num_values_shape = list(scores.shape)
     num_values_shape[0] = 1
     num_values = tf.Variable(initial_value=tf.zeros(shape=num_values_shape, dtype=scores_dtype))
     
-    average_dtype = tf.as_dtype(average.dtype)
-    average_shape = values.shape.as_list()
+    average_dtype = tf.as_dtype(values.dtype)
+    average_shape = list(values.shape)
     average_shape[0] = 1
 
     average = tf.Variable(initial_value=tf.zeros(shape=average_shape, dtype=average_dtype))
@@ -88,10 +100,25 @@ def reduce_mean_by_top_k_scores(values, scores, k):
 
 @tf.function(jit_compile=True)
 def _reduce_mean_by_top_k_scores_pass_1_body(top_scores, score):
-    lowest_top_score = tf.math.argmin(top_scores, axis=-1, output_type=tf.int32)
-    top_scores.scatter_nd_update(indices=lowest_top_score, updates=score)
+    
+    # could do this approach, but i think i'd need some meshgrid stuff to make the indices
+    #lowest_top_score_indices = tf.math.argmin(top_scores, axis=-1, output_type=tf.int32)
+    #top_scores.scatter_nd_update(indices=lowest_top_score_indices, updates=score)
 
-    top_scores.assign(tf.sort(top_scores, axis=-1))
+    # this approach is fine, though, as long as we don't mind overcounting ties (which we do handle later).
+    # actually not fine... if score matches one of the non-lowest entries already in top_scores, we'll lose the uniqueness.
+    # then we'll be adding too few things below...
+    score = tf.expand_dims(score, axis=-1)
+
+    lowest_top_score = tf.math.reduce_min(top_scores, axis=-1, keepdims=True)
+    is_lowest_top_score = tf.math.equal(top_scores, lowest_top_score)
+
+    score_already_in_top_scores = tf.math.equal(top_scores, score)
+    score_already_in_top_scores = tf.math.reduce_any(score_already_in_top_scores, axis=-1, keepdims=True)
+
+    insert_score_here = tf.math.logical_and(is_lowest_top_score, tf.math.logical_not(score_already_in_top_scores))
+
+    top_scores.assign(tf.where(condition=insert_score_here, x=score, y=lowest_top_score))
 
 @tf.function(jit_compile=True)
 def _reduce_mean_by_top_k_scores_pass_2_body(score, value, lowest_score_to_average, average, num_values):
@@ -150,6 +177,8 @@ def local_lucky_precise(
 
     image_store_bhwc = None
     luckiness_store_bhwc = None
+
+    os.makedirs(cache_dir, exist_ok=True)
     
     for image_index in range(len(lights)):
         print(f"Computing luckiness for image {image_index+1} of {len(lights)}")
@@ -158,16 +187,24 @@ def local_lucky_precise(
   
         # todo: fancy upscaling?
       
-        if image_store_bhwc is None:
+        if image_store_bhwc is None:   
+            image_store_filename = os.path.join(cache_dir, 'image_store_bhwc.npy')
+            if os.path.exists(image_store_filename):
+                os.unlink(image_store_filename)
             image_store_bhwc = np.lib.format.open_memmap(
-                filename=os.path.join(cache_dir, 'image_store_bhwc.npy'),
-                mode='w',
+                filename=image_store_filename,
+                mode='w+',
                 dtype=np.float32,
                 shape=(len(lights), image.shape[-3], image.shape[-2], image.shape[-1]),
-            )                
+            )
+            image_store_bhwc._mmap.madvise(mmap.MADV_SEQUENTIAL)                
 
         image_store_bhwc[image_index : image_index + 1, :, :, :] = image
         
+        image_store_bhwc._mmap.madvise(mmap.MADV_DONTNEED)
+        image_store_bhwc._mmap.madvise(mmap.MADV_COLD)
+        image_store_bhwc._mmap.madvise(mmap.MADV_PAGEOUT)
+
         image = bhwc_to_bchw(image)
         if dark_variance is not None:
             dark_variance = bhwc_to_bchw(dark_variance)
@@ -182,15 +219,22 @@ def local_lucky_precise(
                 write_image(bchw_to_bhwc(debug_image), os.path.join(debug_output_dir, f"{debug_image_name}_{image_index:08d}.png"))
 
         if luckiness_store_bhwc is None:
+            luckiness_store_filename = os.path.join(cache_dir, 'luckiness_store_bhwc.npy')
+            if os.path.exists(luckiness_store_filename):
+                os.unlink(luckiness_store_filename)
             luckiness_store_bhwc = np.lib.format.open_memmap(
-                filename=os.path.join(cache_dir, 'luckiness_store_bhwc.npy'),
-                mode='w',
+                filename=luckiness_store_filename,
+                mode='w+',
                 dtype=np.float32,
                 shape=(len(lights), luckiness_bchw.shape[-2], luckiness_bchw.shape[-1], luckiness_bchw.shape[-3]),
             )
+            luckiness_store_bhwc._mmap.madvise(mmap.MADV_SEQUENTIAL)
 
         gc.collect()
         luckiness_store_bhwc[image_index : image_index + 1, :, :, :] = bchw_to_bhwc(luckiness_bchw)
+        luckiness_store_bhwc._mmap.madvise(mmap.MADV_DONTNEED)
+        luckiness_store_bhwc._mmap.madvise(mmap.MADV_COLD)
+        luckiness_store_bhwc._mmap.madvise(mmap.MADV_PAGEOUT)
 
     gc.collect()
 

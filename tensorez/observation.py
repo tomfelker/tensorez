@@ -6,6 +6,7 @@ import hashlib
 import os.path
 import numpy as np
 import gc
+import mmap
 
 class Observation:
     def __init__(self, lights, darks = None, align_by_center_of_mass = False, align_by_content = False, local_align = False, crop = None, crop_align = 2, crop_before_align = False, crop_before_content_align = False, compute_alignment_transforms_kwargs = {}, align_by_center_of_mass_only_even_shifts = False):
@@ -146,6 +147,7 @@ class Observation:
                     filename=flow_dataset_filename,
                     mode='r',
                 )
+                self.local_alignment_dataset._mmap.madvise(mmap.MADV_SEQUENTIAL)
 
             print(f"Loaded alignment transforms from '{alignment_cache_npy_filename}'.")
             return
