@@ -24,11 +24,11 @@ import matplotlib.pyplot as plt
 #)
 
 observation = Observation(
-    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER')),
+    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER'), frame_step=100),
     darks = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', 'darks', '*.SER')),
     align_by_content=True,
     local_align=True,
-    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'flow_regularization_loss': 1e-5, 'max_steps' : 10, 'lod_factor': 4}
+    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'max_steps' : 600, 'lod_factor': 4, 'flow_detail_loss_coefficient': 1e-5, 'flow_alignment_loss_coefficient': 1.1e+4}
 )
 
 #observation = Observation(

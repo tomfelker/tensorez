@@ -12,6 +12,13 @@ To do good moon or extended object lucky imaging, need local alignment.
             - https://ieeexplore.ieee.org/document/9157557
             - These are trying to do video frame extrapolation from motion vectors, or even 3d rendering, differentiably.  Since both of those depend on scatter (i.e., rasterize a triangle and push its color into the output buffer), it's not differentiable.  But in the same way that STN wouldn't work without bilinear sampling, the idea seems to be that instead of just scattering into one pixel, you 'splat' by writing a whole 3x3 kernel, with the kernel center being a function of the input pixel coordinate.  (There's an interesting idea where you recompute the kernel each time, even though you know it's centered at 0,0, so that the derivatives can flow.  The derivatives must flow!)
             - This is actutally kind of similar to drizzle as it's commonly written, just with a cooler kernel.
+    - what's the actual power spectrum of flow i should expect?
+        wavenumber: k ∝ 1/r
+        energy: E(k) ∝ k^(-5/3)
+        wavenumber should be what we get from fftfreqs (spatial frequencies)
+        
+
+
 
 ## Drizzle:
 - there is existing ancient C code (astropy.drizzle -> drizzlepac)
