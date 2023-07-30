@@ -44,7 +44,7 @@ import gc
 def local_lucky(
     lights,
     algorithm,
-    algorithm_kwargs,
+    algorithm_kwargs = {},
     average_image = None,
     steepness = 3,
     stdevs_above_mean = 3,

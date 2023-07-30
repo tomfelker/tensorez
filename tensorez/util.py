@@ -376,7 +376,7 @@ def align_by_center_of_mass(image_hwc, max_align_steps = 10, only_even_shifts = 
     
 
 def pad_image(image, pad):
-    if pad is not 0:
+    if pad != 0:
         paddings = tf.constant([[pad, pad], [pad, pad], [0, 0]])
         image = tf.pad(image, paddings)
     return image
@@ -397,7 +397,7 @@ def center_image(image, pad = 0, only_even_shifts = False):
         shift = tf.bitwise.bitwise_and(shift, -2)
     
     shift = shift * -1
-    #print("shift:", shift)
+    tf.print("center_image: shift:", shift)
     shift_axis = spatial_dims
     image = tf.roll(image, shift = shift, axis = shift_axis)
 
@@ -539,7 +539,9 @@ def welfords_get_stdev(existingAggregate):
     return tf.sqrt(M2 / count)
 
 
-def middle_out(start_index, count):
+def middle_out(start_index, count, include_start=False):
+    if include_start:
+        yield start_index, None
     for index in range(start_index + 1, count):
         yield index, index - 1
     for index in range(start_index - 1, -1, -1):

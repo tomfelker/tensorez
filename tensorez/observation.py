@@ -167,7 +167,7 @@ class Observation:
             self.computing_alignment_transforms = False
 
 
-        print("Saving alignment transforms to {alignment_cache_npy_filename}")
+        print(f"Saving alignment transforms to {alignment_cache_npy_filename}")
         np.save(alignment_cache_npy_filename, self.alignment_transforms)
         with open(alignment_cache_txt_filename, mode='w') as txtfile:
             txtfile.write(hash_info)
@@ -180,7 +180,7 @@ class Observation:
 
         image = self.lights.read_image(index)
 
-        if want_dark_variance:
+        if want_dark_variance and hasattr(self, 'dark_variance'):
             dark_variance = self.dark_variance
         else:
             dark_variance = None
@@ -195,7 +195,7 @@ class Observation:
 
         if self.align_by_center_of_mass:
             if dark_variance is None:
-                image, align_by_center_of_mass(image, only_even_shifts = self.align_by_center_of_mass_only_even_shifts)
+                image = align_by_center_of_mass(image, only_even_shifts = self.align_by_center_of_mass_only_even_shifts)
             else:
                 image, dark_variance = align_by_center_of_mass(image, only_even_shifts = self.align_by_center_of_mass_only_even_shifts, also_align_hwc=dark_variance)
 

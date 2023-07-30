@@ -23,13 +23,20 @@ import matplotlib.pyplot as plt
 #    #compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
 #)
 
-observation = Observation(
-    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER'), frame_step=100),
-    darks = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', 'darks', '*.SER')),
-    align_by_content=True,
-    local_align=True,
-    compute_alignment_transforms_kwargs={'allow_scale': False, 'allow_skew': False, 'max_steps' : 600, 'lod_factor': 4, 'flow_detail_loss_coefficient': 1e-5, 'flow_alignment_loss_coefficient': 1.1e+4}
-)
+#observation = Observation(
+#    lights = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', '2020-12-22-0202_2-CapObj.SER')),
+#    darks = ImageSequence(os.path.join('data', '2020-12-22Z_moon_etc', 'moon', 'darks', '*.SER')),
+#    align_by_content=True,
+#    local_align=True,
+#    compute_alignment_transforms_kwargs={
+#        'max_steps' : 200,
+#        'lod_factor': 4,
+#        'flow_detail_loss_coefficient': 1e-5,
+#        'flow_alignment_loss_coefficient': 1.1e+4,
+#        'fine_tune': True,
+#        'fine_tune_steps': 200
+#    }
+#)
 
 #observation = Observation(
 #    lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER')),
@@ -84,6 +91,20 @@ observation = Observation(
 #    align_by_content=True,
 #    compute_alignment_transforms_kwargs={'allow_scale': True, 'allow_skew': True}
 #)
+
+observation = Observation(
+    lights = ImageSequence(os.path.join('data', '2023-07-30_iss', '*.SER'), start_frame=155, end_frame=205),
+    align_by_center_of_mass=True,
+    align_by_center_of_mass_only_even_shifts=True,
+    # TODO: this isn't working right
+    crop=(512, 512),
+    crop_align=2,
+    crop_before_align=False,
+    crop_before_content_align=True,
+    align_by_content=False,
+    compute_alignment_transforms_kwargs={'allow_rotation': False, 'allow_scale': False, 'allow_skew': False}
+)
+
 
 
 output_dir = create_timestamped_output_dir('pipeline')

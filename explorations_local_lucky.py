@@ -40,6 +40,7 @@ from tensorez.bayer import *
 from tensorez.fourier import *
 from tensorez.obd import *
 from tensorez.local_lucky import *
+from tensorez.observation import *
 
 ###############################################################################
 # Settings
@@ -61,8 +62,8 @@ debug_frames = 2
 #align_by_center_of_mass = False
 
 # Mars, directly imaged, near opposition, somewhat dewy lens
-lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER'), frame_step=1, end_frame=None)
-darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER'), frame_step=1, end_frame=None)
+#lights = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'lights', '*.SER'), frame_step=1, end_frame=None)
+#darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', 'mars_prime', 'darks', '*.SER'), frame_step=1, end_frame=None)
 #align_by_center_of_mass = True
 #crop = (512, 512)
 
@@ -79,6 +80,14 @@ darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', '
 #align_by_center_of_mass = True
 #crop = (2048, 2048)
 
+# ISS
+observation = Observation(
+    lights = ImageSequence(os.path.join('data', '2023-07-30_iss', '*.SER'), start_frame=155, end_frame=205),
+    align_by_center_of_mass=True
+)
+
+crop=(512,512)
+
 ###############################################################################
 # Functions
 
@@ -86,5 +95,5 @@ darks = ImageSequence(os.path.join('data', '2022-12-07_moon_mars_conjunction', '
 ###############################################################################
 # Code
 
-local_lucky(lights, darks)
+local_lucky(observation, LuckinessAlgorithmFrequencyBands, algorithm_kwargs={'isoplanatic_patch_pixels': 50, 'crossover_wavelength_pixels': 5,  'noise_wavelength_pixels': 2})
 

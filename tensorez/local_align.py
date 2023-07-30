@@ -30,25 +30,6 @@ def local_align(
     # if not none, we will dump a bunch of debug images here
     debug_output_dir = None,
 
-    learning_rate_flow = 1e-2,
-    # how much to update dx and dy per mean-squared-error-of-unit-variance
-    learning_rate_translation = 1e-3,
-    # how much to update theta by per mean-squared-error-of-unit-variance
-    learning_rate_rotation = 1e-3,
-    # how much to update log_scale by per mean-squared-error-of-unit-variance
-    learning_rate_log_scale = 1e-3,
-    # how much to update skew by per mean-squared-error-of-unit-variance
-    learning_rate_skew = 1e-3,
-    # don't update local flow by more than this many pixels
-    max_update_flow_pixels = 0.9,
-    # don't update dx or dy by more than this many pixels    
-    max_update_translation_pixels = 0.9,
-    # don't rotate such that we'd move some part of the image by more than this many pixels
-    max_update_rotation_pixels = 3,
-    # don't scale such that we'd move some part of the image by more than this many pixels
-    max_update_scale_pixels = 3,
-    # don't skew such that we'd move some part of the image by more than this many pixels
-    max_update_skew_pixels = 3,
     # prevents the result for having too much detail in the flow
     flow_detail_loss_coefficient = 1e-6,
     # prevents the result from encoding in the flow what it could represent in the alignment transform
@@ -66,18 +47,10 @@ def local_align(
     blur_pixels = 4,
     # if true, after aligning each image, we add it into our target - could help if each image is bad, but could also add error
     incrementally_improve_target_image = False,
-    allow_rotation = True,
-    allow_scale = False,
-    allow_skew = False,
     normalize_flow = True,
+    fine_tune = True,
+    fine_tune_steps = 200,
 ):
-    if not allow_rotation:
-        learning_rate_rotation = 0
-    if not allow_scale:
-        learning_rate_log_scale = 0
-    if not allow_skew:
-        learning_rate_skew = 0
-
     image_shape = lights[0].shape
     image_shape_hw = image_shape.as_list()[-3:-1]
     flow_shape_hw = [int(image_shape_hw[0] // flow_downsample // 2) * 2, int(image_shape_hw[1] // flow_downsample // 2) * 2]
@@ -91,6 +64,10 @@ def local_align(
 
     mask_image = generate_mask_image(image_shape)
 
+    average_unaligned = None
+    average_global_aligned = None
+    average_local_aligned = None
+
     if debug_output_dir is not None:
         write_image(mask_image, os.path.join(debug_output_dir, 'mask_image.png'))
 
@@ -98,6 +75,8 @@ def local_align(
         # so, only doing them when we're doing debug output.
         average_unaligned = tf.Variable(tf.zeros(image_shape))
         average_global_aligned = tf.Variable(tf.zeros(image_shape))
+
+    if fine_tune or (debug_output_dir is not None):
         average_local_aligned = tf.Variable(tf.zeros(image_shape))
 
     # todo: fft
@@ -133,12 +112,11 @@ def local_align(
     target_image = tf.Variable(lights[target_image_index])    
     target_image.assign(image_with_zero_mean_and_unit_variance(target_image))
 
-    average_final_highest_lod_loss = 0
     for image_index, middleward_index in middle_out(target_image_index, len(lights)):
         gc.collect()
         image_bhwc = lights[image_index]
 
-        if debug_output_dir is not None:
+        if average_unaligned is not None:
             average_unaligned.assign_add(image_bhwc)
 
         normalized_image_bhwc = image_with_zero_mean_and_unit_variance(image_bhwc)
@@ -157,28 +135,6 @@ def local_align(
 
             lod_flow_shape_hw = [int(lod_image_shape_hw[0] // flow_downsample // 2) * 2, int(lod_image_shape_hw[1] // flow_downsample // 2) * 2]
             
-            transform_learning_rate_for_lod = tf.constant([
-                learning_rate_translation * lod_downsample_factor,
-                learning_rate_translation * lod_downsample_factor,
-                learning_rate_rotation * lod_downsample_factor,
-                learning_rate_log_scale * lod_downsample_factor,
-                learning_rate_log_scale * lod_downsample_factor,
-                learning_rate_skew * lod_downsample_factor,
-            ])
-
-            flow_learning_rate = learning_rate_flow * lod_downsample_factor
-
-            transform_max_update_for_lod = tf.constant([
-                max_update_translation_pixels / lod_max_dimension,
-                max_update_translation_pixels / lod_max_dimension,
-                max_update_rotation_pixels / lod_max_dimension,
-                math.log(1.0 + max_update_scale_pixels / lod_max_dimension),
-                math.log(1.0 + max_update_scale_pixels / lod_max_dimension),
-                max_update_skew_pixels / lod_max_dimension,
-            ])
-
-            flow_max_update = max_update_flow_pixels / lod_max_dimension
-
             # todo: memoize downsampled_mask_image across lods
             # todo: if we don't incrementally_improve_target_image, we could memoize it too
             if lod_downsample_factor != 1:
@@ -218,10 +174,6 @@ def local_align(
                 flow=flow,
                 target_image=lod_target_image,
                 mask_image=lod_mask_image,
-                transform_learning_rate=transform_learning_rate_for_lod,
-                transform_max_update=transform_max_update_for_lod,
-                flow_learning_rate=flow_learning_rate,
-                flow_max_update=flow_max_update,
                 flow_detail_loss_coefficient=flow_detail_loss_coefficient,
                 flow_alignment_loss_coefficient=flow_alignment_loss_coefficient,
                 max_steps = tf.constant(max_steps, dtype=tf.int32),
@@ -240,17 +192,16 @@ def local_align(
             new_image_weight = 1.0 / (image_index + 1)
             target_image.assign(image_with_zero_mean_and_unit_variance(target_image * (1 - new_image_weight) + normalized_image_bhwc * new_image_weight))
 
-        if debug_output_dir is not None:
+        if average_global_aligned is not None:
             global_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow_bihw = None)
             average_global_aligned.assign_add(global_aligned)
 
+        if average_local_aligned is not None:
             local_aligned = transform_image(image_bhwc, alignment_transforms[image_index, :], flow_bihw = flow)
             average_local_aligned.assign_add(local_aligned)
 
         # store it to the disk - magic!
         flow_dataset[image_index:image_index+1, :, :, :] = flow
-
-        average_final_highest_lod_loss += final_loss   
 
         if debug_output_dir is not None:            
             write_image(local_aligned, os.path.join(debug_output_dir, f"local_aligned_{image_index:08d}.png"))
@@ -259,20 +210,25 @@ def local_align(
 
             write_flow_image(flow, os.path.join(debug_output_dir, f"flow_{image_index:08d}.png"))
 
-    if debug_output_dir is not None:
+    if average_unaligned is not None or average_global_aligned is not None or average_local_aligned is not None:
         # so far we've skipped the target image, add it in
         unnormalized_target_image = lights[target_image_index]
-        average_unaligned.assign_add(unnormalized_target_image)
-        average_global_aligned.assign_add(unnormalized_target_image)
-        average_local_aligned.assign_add(unnormalized_target_image)
 
-        average_unaligned.assign(average_unaligned / len(lights))
-        average_global_aligned.assign(average_global_aligned / len(lights))
-        average_local_aligned.assign(average_local_aligned / len(lights))
-
-        write_image(average_unaligned, os.path.join(debug_output_dir, "aa_average_unaligned.png"))
-        write_image(average_global_aligned, os.path.join(debug_output_dir, "ab_average_global_aligned.png"))
-        write_image(average_local_aligned, os.path.join(debug_output_dir, "ad_average_local_aligned.png"))
+        if average_unaligned is not None:
+            average_unaligned.assign_add(unnormalized_target_image)
+            average_unaligned.assign(average_unaligned / len(lights))
+            if debug_output_dir is not None:
+                write_image(average_unaligned, os.path.join(debug_output_dir, "aa_average_unaligned.png"))
+        if average_global_aligned is not None:
+            average_global_aligned.assign_add(unnormalized_target_image)
+            average_global_aligned.assign(average_global_aligned / len(lights))
+            if debug_output_dir is not None:
+                write_image(average_global_aligned, os.path.join(debug_output_dir, "ab_average_global_aligned.png"))
+        if average_local_aligned is not None:
+            average_local_aligned.assign_add(unnormalized_target_image)
+            average_local_aligned.assign(average_local_aligned / len(lights))
+            if debug_output_dir is not None:
+                write_image(average_local_aligned, os.path.join(debug_output_dir, "ae_average_local_aligned.png"))
 
     if normalize_flow:        
         num_flows = flow_dataset.shape[0]
@@ -296,13 +252,65 @@ def local_align(
             flow_dataset[image_index:image_index+1] = normalized_flow
 
         if debug_output_dir is not None:
+            average_local_aligned = tf.Variable(tf.zeros(image_shape))
+            for image_index in range(len(lights)):
+                print(f'After normalizing, re-averaging {image_index+1} of {len(lights)}')
+                image = lights[image_index]
+                image = transform_image(image,  alignment_transforms[image_index, :], flow_dataset[image_index:image_index+1,:])
+                average_local_aligned.assign_add(image)
+            average_local_aligned.assign(average_local_aligned / len(lights))
+            write_image(average_local_aligned, os.path.join(debug_output_dir, "ac_average_local_aligned_normalized.png"))
+
+    if fine_tune:
+        target_image = image_with_zero_mean_and_unit_variance(average_local_aligned)
+        
+        if blur_pixels != 0:
+            target_image = tf.nn.conv2d(target_image, blur_kernel, strides = 1, padding = 'SAME')
+
+        for image_index in range(len(lights)):
+
+            image_bhwc = lights[image_index]
+
+            normalized_image_bhwc = image_with_zero_mean_and_unit_variance(image_bhwc)
+            del image_bhwc
+            gc.collect()
+
+            if blur_pixels != 0:
+                normalized_image_bhwc = tf.nn.conv2d(normalized_image_bhwc, blur_kernel, strides = 1, padding = 'SAME')
+
+            flow = tf.Variable(flow_dataset[image_index:image_index+1, :, :, :])
+
+            debug_string = f'Fine-tuning alignment for image {image_index + 1} of {len(lights)}'
+            print(debug_string)
+
+            new_alignment_transform, new_flow, final_loss = local_align_training_loop(
+                normalized_image_bhwc,
+                # it doesn't seem to like using a slice of a variable, so need to make a new one
+                alignment_transform=tf.Variable(alignment_transforms[image_index, :]),
+                flow=flow,
+                target_image=target_image,
+                mask_image=mask_image,
+                flow_detail_loss_coefficient=flow_detail_loss_coefficient,
+                flow_alignment_loss_coefficient=flow_alignment_loss_coefficient,
+                max_steps = tf.constant(fine_tune_steps, dtype=tf.int32),
+                debug_string=tf.constant(debug_string)
+            )
+
+            alignment_transforms[image_index, :].assign(new_alignment_transform)
+            flow_dataset[image_index:image_index+1, :, :, :] = new_flow
+
+            if debug_output_dir is not None:            
+                write_flow_image(new_flow, os.path.join(debug_output_dir, f"flow_tuned_{image_index:08d}.png"))
+
+        if debug_output_dir is not None:
             average_image = tf.Variable(tf.zeros(image_shape))
             for image_index in range(len(lights)):
+                print(f'After fine tuning, re-averaging {image_index+1} of {len(lights)}')
                 image = lights[image_index]
                 image = transform_image(image,  alignment_transforms[image_index, :], flow_dataset[image_index:image_index+1,:])
                 average_image.assign_add(image)
             average_image.assign(average_image / len(lights))
-            write_image(average_image, os.path.join(debug_output_dir, "ac_average_local_aligned_normalized.png"))
+            write_image(average_image, os.path.join(debug_output_dir, "ad_average_local_aligned_fine_tuned.png"))
 
     return alignment_transforms, flow_dataset
 
@@ -331,7 +339,7 @@ def write_flow_image(flow_bihw, filename, flow_scale = 100, style = 'rg', **writ
 
 # can't be function because optimizer creates variables - even passing it in didn't help.
 #@tf.function#(jit_compile=False)
-def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, transform_learning_rate, transform_max_update, flow_learning_rate, flow_max_update, flow_detail_loss_coefficient, flow_alignment_loss_coefficient, max_steps, debug_string):
+def local_align_training_loop(image_bhwc, alignment_transform, flow, target_image, mask_image, flow_detail_loss_coefficient, flow_alignment_loss_coefficient, max_steps, debug_string):
 
     # for Adam, need to nerf learning rate a lot or it way overshoots on the first update
     #optimizer = tf.keras.optimizers.Adam(learning_rate=0.00001)
@@ -357,14 +365,6 @@ def local_align_training_loop(image_bhwc, alignment_transform, flow, target_imag
         gradients = tape.gradient(loss, variables)
 
         optimizer.apply_gradients(zip(gradients, variables))
-
-        #transform_update = transform_gradient * transform_learning_rate
-        #transform_update = tf.clip_by_value(transform_update, -transform_max_update, transform_max_update)
-        #alignment_transform -= transform_update
-
-        #flow_update = flow_gradient * flow_learning_rate
-        #flow_update = tf.clip_by_value(flow_update, -flow_max_update, flow_max_update)
-        #flow -= flow_update
 
         tf.print(debug_string, "loss:", loss, "after step", step, "of", max_steps, output_stream=sys.stdout)
 

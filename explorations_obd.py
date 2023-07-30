@@ -146,7 +146,7 @@ estimated_image += bias
 
 estimated_image = hwc_to_chw(pad_for_conv(estimated_image, psf_size))
 
-if initial_blur_stddev_px is not 0:
+if initial_blur_stddev_px != 0:
     initial_blur_psf = gaussian_psf(psf_size, initial_blur_stddev_px / psf_size)
     initial_blur_psf = tf.expand_dims(initial_blur_psf, axis = -4)
     write_image(initial_blur_psf, os.path.join(output_dir, 'initial_blur_psf.png'), normalize = True)

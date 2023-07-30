@@ -25,6 +25,9 @@ class ImageSequence:
                 print(f"adding {filename}")
                 filenames.append(filename)
 
+        if len(filenames) == 0:
+            raise RuntimeError(f"Couldn't find any files matching {fileglobs}")
+
         self.filenames_and_raw_start_frames = []
         
         start_raw_frame_for_file = 0
