@@ -183,7 +183,8 @@ export const SCHEMA = [
       // representation is serialized; pixel_size_um present = camera mode.
       { key: 'pixel_scale_arcsec', type: 'pixelscale', labelText: 'pixel scale',
         default: 0.25, min: 0.001, required: true,
-        help: 'must oversample λ/D (hard error otherwise; warning under 2×)',
+        help: 'of the sensor photosites (superpixel debayer is accounted for ' +
+          'automatically). Undersampling vs λ/D warns but never fails',
         camera: { focal_length_mm: 2800, barlow: 1.0, pixel_size_um: 4.3 },
         skipIf: (s) => 'pixel_size_um' in s },
       { key: 'focal_length_mm', type: 'float', hidden: true, optional: true,

@@ -625,10 +625,17 @@ class Pipeline:
         aligned/cropped cooked frames to torchmfbd, and returns the
         reconstructed object.  Not cached: it *is* a final product.
         """
-        from .deconv import psf_examples_image, run_torchmfbd
+        from .deconv import apply_superpixel_scale, psf_examples_image, run_torchmfbd
 
         cfg = self.recipe.mfbd
         assert cfg is not None
+        effective = apply_superpixel_scale(cfg, obs.lights.is_bayer, obs.lights.debayer)
+        if effective is not cfg:
+            self.emitter.log(
+                f"mfbd: superpixel debayer halves the sampling — effective pixel scale "
+                f"{effective.pixel_scale_arcsec:.4g} arcsec/pixel (2x the sensor's)"
+            )
+            cfg = effective
         total = len(obs)
 
         with self.stage("mfbd", cached=False):

@@ -87,7 +87,9 @@ top_n = 12                   # count of luckiest frames…
 diameter_cm = 27.94          # default: Celestron C11 aperture
 central_obscuration_cm = 9.5 # default: Celestron C11
 # Pixel scale — EXACTLY ONE representation per recipe file (hard error if both/neither):
-pixel_scale_arcsec = 0.158   # (a) direct; must oversample λ/D (hard error; warning under 2×)
+pixel_scale_arcsec = 0.158   # (a) direct. Describes the SENSOR photosites; superpixel
+                             # debayer modes double the effective scale automatically.
+                             # Undersampling (< 2 px per λ/D, or even < 1) warns, never fails.
 # focal_length_mm = 2800.0   # (b) camera mode: scale = 206.265·pixel_size_um/(focal_length_mm·barlow)
 # barlow = 1.0
 # pixel_size_um = 4.3        #     required in camera mode
@@ -227,6 +229,11 @@ tensorez dev branch, with file identity added to the key.
   weights each pixel by the per-channel Bayer sample mask, now shifted per frame
   along with the image. With `"superpixel_rggb"`, `[mfbd] wavelengths_nm` needs 4
   entries (R, G1, G2, B).
+- `[mfbd]` pixel-scale keys (both forms) always describe the sensor photosites;
+  with a superpixel debayer mode the pipeline doubles the effective
+  `pixel_scale_arcsec` itself (and logs it). Undersampling relative to λ/D is a
+  warning, never a hard error — deconvolving seeing-blurred undersampled data is
+  a legitimate, knowingly-degraded choice.
 - The old `[lucky]` and `[deconv]` sections were split/renamed into
   `[lucky_scoring]` / `[lucky_stack]` / `[local_lucky]` / `[mfbd]` (all
   optional, at least one producer required); old names are unknown-section

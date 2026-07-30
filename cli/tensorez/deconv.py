@@ -42,6 +42,7 @@ callbacks and an honest loss history without touching the library.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import logging
 from dataclasses import dataclass
@@ -70,8 +71,21 @@ def overfill_factor(wavelength_nm: float, diameter_cm: float, pixel_scale_arcsec
     return 206265.0 * wavelength_cm / (diameter_cm * pixel_scale_arcsec)
 
 
+def apply_superpixel_scale(cfg: MfbdConfig, is_bayer: bool, debayer: str) -> MfbdConfig:
+    """The recipe's pixel keys describe the *sensor photosites*; superpixel
+    debayering halves the sampling, so the effective pixel scale doubles."""
+    if is_bayer and debayer.startswith("superpixel"):
+        return dataclasses.replace(cfg, pixel_scale_arcsec=cfg.pixel_scale_arcsec * 2)
+    return cfg
+
+
 def check_optics(cfg: MfbdConfig, channels: int, log: LogCallback) -> None:
-    """Validate the physical setup; raises ValueError on impossible configs."""
+    """Validate the physical setup; raises ValueError only on config mistakes.
+
+    Undersampling is warned about, not fatal: seeing-blurred data can still
+    benefit from deconvolution, it just cannot recover detail finer than the
+    pixels — the user may knowingly accept that.
+    """
     if len(cfg.wavelengths_nm) != channels:
         raise ValueError(
             f"[mfbd] wavelengths_nm has {len(cfg.wavelengths_nm)} entries but the "
@@ -81,15 +95,17 @@ def check_optics(cfg: MfbdConfig, channels: int, log: LogCallback) -> None:
         overfill = overfill_factor(w, cfg.diameter_cm, cfg.pixel_scale_arcsec)
         diffraction_arcsec = 206265.0 * w * 1e-7 / cfg.diameter_cm
         if overfill < 1.0:
-            max_pix = 206265.0 * w * 1e-7 / cfg.diameter_cm
-            raise ValueError(
-                f"[mfbd] pixel_scale_arcsec={cfg.pixel_scale_arcsec} is too coarse to model "
-                f"a {cfg.diameter_cm} cm aperture at {w} nm (lambda/D = {diffraction_arcsec:.3f}\"); "
-                f"needs <= {max_pix:.3f} arcsec/pixel"
-            )
-        if overfill < 2.0:
             log(
-                f"deconv: {w} nm is undersampled at {cfg.pixel_scale_arcsec}\"/pix "
+                f"mfbd: {w} nm is SEVERELY undersampled at {cfg.pixel_scale_arcsec}\"/pix "
+                f"(lambda/D = {diffraction_arcsec:.3f}\" is smaller than one pixel) — the "
+                f"PSF model cannot represent the aperture's full resolution; results may "
+                f"be unreliable. A barlow (or debayer = \"bilinear\" instead of superpixel) "
+                f"would help",
+                "warning",
+            )
+        elif overfill < 2.0:
+            log(
+                f"mfbd: {w} nm is undersampled at {cfg.pixel_scale_arcsec}\"/pix "
                 f"(lambda/D = {diffraction_arcsec:.3f}\" spans only {overfill:.2f} px; "
                 f"< 2 px is below Nyquist)",
                 "warning",

@@ -154,6 +154,33 @@ debug_frames = 0
     assert "wavelengths_nm" in events[-1]["message"]
 
 
+def test_undersampling_warns_but_never_fails() -> None:
+    """Coarse pixel scales log warnings (severe or Nyquist) instead of raising."""
+    from tensorez.deconv import apply_superpixel_scale, check_optics
+    from tensorez.recipe import MfbdConfig
+
+    def collect(cfg):
+        events: list[tuple[str, str]] = []
+        check_optics(cfg, channels=1, log=lambda m, level="info": events.append((level, m)))
+        return events
+
+    # lambda/D at 550 nm on a C11 is ~0.41"; 1.0"/px doesn't even span it
+    severe = collect(MfbdConfig(pixel_scale_arcsec=1.0, wavelengths_nm=(550.0,)))
+    assert any(lvl == "warning" and "SEVERELY undersampled" in m for lvl, m in severe)
+    # 0.3"/px spans it with ~1.35 px: below Nyquist but representable
+    mild = collect(MfbdConfig(pixel_scale_arcsec=0.3, wavelengths_nm=(550.0,)))
+    assert any(lvl == "warning" and "below Nyquist" in m for lvl, m in mild)
+    # 0.1"/px is comfortably oversampled: silence
+    assert collect(MfbdConfig(pixel_scale_arcsec=0.1, wavelengths_nm=(550.0,))) == []
+
+    # superpixel debayering doubles the effective scale (sensor-referred keys)
+    cfg = MfbdConfig(pixel_scale_arcsec=0.2, wavelengths_nm=(550.0,))
+    assert apply_superpixel_scale(cfg, True, "superpixel_rgb").pixel_scale_arcsec == 0.4
+    assert apply_superpixel_scale(cfg, True, "superpixel_rggb").pixel_scale_arcsec == 0.4
+    assert apply_superpixel_scale(cfg, True, "bilinear") is cfg
+    assert apply_superpixel_scale(cfg, False, "superpixel_rgb") is cfg
+
+
 # -- (b) end-to-end + (c) science ------------------------------------------
 
 @dataclass
