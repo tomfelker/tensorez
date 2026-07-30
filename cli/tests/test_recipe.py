@@ -16,6 +16,8 @@ name = "t"
 
 [lights]
 paths = ["{SYNTHETIC_SER.as_posix()}"]
+
+[local_lucky]
 """
 
 
@@ -31,20 +33,50 @@ def test_minimal_recipe_defaults(tmp_path: Path) -> None:
     assert r.lights.debayer == "bilinear"
     assert r.align.center_of_mass is True
     assert r.align.crop is None
-    assert r.lucky.crossover_wavelength_pixels == 35.0
-    assert r.lucky.stdevs_above_mean == 2.5
+    assert r.local_lucky is not None
+    assert r.local_lucky.crossover_wavelength_pixels == 35.0
+    assert r.local_lucky.stdevs_above_mean == 2.5
+    assert r.lucky_scoring is None
+    assert r.lucky_stack is None
+    assert r.mfbd is None
     assert r.output.debug_frames == 10
     assert r.darks is None
 
 
 def test_unknown_key_is_error(tmp_path: Path) -> None:
+    # MINIMAL ends inside [local_lucky], so the typo'd key lands there
     with pytest.raises(RecipeError, match="unknown key 'crossover_wavelength_pixel'"):
-        _load(tmp_path, MINIMAL + "\n[lucky]\ncrossover_wavelength_pixel = 30.0\n")
+        _load(tmp_path, MINIMAL + "crossover_wavelength_pixel = 30.0\n")
 
 
 def test_unknown_section_is_error(tmp_path: Path) -> None:
     with pytest.raises(RecipeError, match=r"unknown section \[luckyy\]"):
         _load(tmp_path, MINIMAL + "\n[luckyy]\nsteepness = 1.0\n")
+    # the pre-split section names are gone, not silently accepted
+    with pytest.raises(RecipeError, match=r"unknown section \[lucky\]"):
+        _load(tmp_path, MINIMAL + "\n[lucky]\nsteepness = 1.0\n")
+    with pytest.raises(RecipeError, match=r"unknown section \[deconv\]"):
+        _load(tmp_path, MINIMAL + "\n[deconv]\ntop_n = 4\n")
+
+
+def test_producer_branch_rules(tmp_path: Path) -> None:
+    no_producer = MINIMAL.replace("[local_lucky]\n", "")
+    with pytest.raises(RecipeError, match="nothing produces an output"):
+        _load(tmp_path, no_producer)
+    with pytest.raises(RecipeError, match=r"\[lucky_stack\] requires \[lucky_scoring\]"):
+        _load(tmp_path, MINIMAL + "\n[lucky_stack]\ntop_fractions = [0.1]\n")
+    with pytest.raises(RecipeError, match=r"\[mfbd\] frames = 'lucky_top' requires"):
+        _load(tmp_path, MINIMAL + "\n[mfbd]\nwavelengths_nm = [550.0]\n"
+                                  "pixel_scale_arcsec = 0.25\n")
+    with pytest.raises(RecipeError, match=r"\[lucky_stack\] top_fractions"):
+        _load(tmp_path, MINIMAL + "\n[lucky_scoring]\n[lucky_stack]\ntop_fractions = [0.0]\n")
+    with pytest.raises(RecipeError, match="top_n and top_fraction are mutually exclusive"):
+        _load(tmp_path, MINIMAL + "\n[lucky_scoring]\n[mfbd]\ntop_n = 8\ntop_fraction = 0.1\n"
+                                  "wavelengths_nm = [550.0]\npixel_scale_arcsec = 0.25\n")
+    # frames = "all" needs no scoring
+    r = _load(tmp_path, MINIMAL + "\n[mfbd]\nframes = \"all\"\n"
+                                  "wavelengths_nm = [550.0]\npixel_scale_arcsec = 0.25\n")
+    assert r.mfbd is not None and r.lucky_scoring is None
 
 
 def test_wrong_types_are_errors(tmp_path: Path) -> None:
@@ -52,8 +84,8 @@ def test_wrong_types_are_errors(tmp_path: Path) -> None:
         _load(tmp_path, MINIMAL.replace('paths = ', 'frame_step = 1.5\npaths = '))
     with pytest.raises(RecipeError, match=r"\[align\] crop"):
         _load(tmp_path, MINIMAL + "\n[align]\ncrop = [512]\n")
-    with pytest.raises(RecipeError, match=r"\[lucky\] steepness"):
-        _load(tmp_path, MINIMAL + "\n[lucky]\nsteepness = \"sharp\"\n")
+    with pytest.raises(RecipeError, match=r"\[local_lucky\] steepness"):
+        _load(tmp_path, MINIMAL + "steepness = \"sharp\"\n")
     with pytest.raises(RecipeError, match="only version 0"):
         _load(tmp_path, MINIMAL.replace("version = 0", "version = 1"))
     with pytest.raises(RecipeError, match=r"\[lights\] debayer"):
@@ -72,7 +104,7 @@ def test_relative_paths_resolve_against_recipe_dir(tmp_path: Path) -> None:
 def test_cli_unknown_key_emits_error_event(tmp_path: Path) -> None:
     """(e) A recipe with an unknown key fails with nonzero exit + `error` event."""
     recipe = tmp_path / "bad.toml"
-    recipe.write_text(MINIMAL + "\n[lucky]\nstdevs_above_meen = 2.0\n")
+    recipe.write_text(MINIMAL + "stdevs_above_meen = 2.0\n")
     proc = run_cli(["run", str(recipe)], cwd=tmp_path)
     assert proc.returncode != 0
     events = parse_events(proc.stdout)

@@ -140,7 +140,7 @@ name = "bayer_{debayer}"
 [lights]
 paths = ["{path.as_posix()}"]
 debayer = "{debayer}"
-[lucky]
+[local_lucky]
 crossover_wavelength_pixels = 4.0
 isoplanatic_patch_pixels = 8.0
 [output]

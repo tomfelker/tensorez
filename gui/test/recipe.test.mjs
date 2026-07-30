@@ -16,7 +16,7 @@ export default async function run(browser) {
   assert.match(await toml.inputValue(), /name = "jupiter_night1"/);
 
   // log stepper: 35 * sqrt(2) -> 49.5 (3 significant digits)
-  const cross = page.locator('[data-field="lucky.crossover_wavelength_pixels"]');
+  const cross = page.locator('[data-field="local_lucky.crossover_wavelength_pixels"]');
   await cross.locator('button[title="multiply by √2"]').click();
   assert.equal(await cross.locator('input').inputValue(), '49.5');
   assert.match(await toml.inputValue(), /crossover_wavelength_pixels = 49\.5/);
@@ -73,7 +73,7 @@ export default async function run(browser) {
   await page.waitForTimeout(500); // debounce
   assert.equal(await nameInput.inputValue(), 'saturn_take2');
   assert.equal(
-    await page.locator('[data-field="lucky.steepness"] .stepper input').inputValue(), '7.5');
+    await page.locator('[data-field="local_lucky.steepness"] .stepper input').inputValue(), '7.5');
   assert.equal(
     await page.locator('[data-field="align.center_of_mass"] input[type=checkbox]').isChecked(),
     false);
@@ -91,7 +91,7 @@ export default async function run(browser) {
   await toml.fill(newToml.replace('[output]', 'typo_key = 3\n[output]'));
   await page.waitForTimeout(500);
   assert.match(await page.locator('#rc-toml-error').textContent(),
-    /unknown key lucky\.typo_key/);
+    /unknown key local_lucky\.typo_key/);
   // fix it again -> error clears
   await toml.fill(newToml);
   await page.waitForTimeout(500);
@@ -105,7 +105,7 @@ export default async function run(browser) {
   assert.match(await toml.inputValue(), /name = "jupiter_demo"/);
   assert.equal(await nameInput.inputValue(), 'jupiter_demo');
   assert.equal(
-    await page.locator('[data-field="lucky.isoplanatic_patch_pixels"] .stepper input')
+    await page.locator('[data-field="local_lucky.isoplanatic_patch_pixels"] .stepper input')
       .inputValue(), '55');
 
   // ---- Save (already has a path; mock write goes to memory fs) ----

@@ -20,12 +20,12 @@ export default async function run(browser) {
   // groups in pipeline order with artifacts
   const groups = await page.locator('.stage-group h3').allTextContents();
   assert.deepEqual(groups.map((g) => g.trim().match(/^[a-z_]+/)[0]),
-    ['align', 'lucky', 'deconv', 'output']);
+    ['align', 'lucky_scoring', 'local_lucky', 'lucky_stack', 'mfbd', 'output']);
 
   const imgs = await page.locator('.artifact-thumb img').count();
-  assert.equal(imgs, 12, `expected 12 image artifacts, got ${imgs}`);
+  assert.equal(imgs, 14, `expected 14 image artifacts, got ${imgs}`);
   const chips = await page.locator('.artifact-chip').count();
-  assert.equal(chips, 6, `expected 6 non-image artifact chips, got ${chips}`);
+  assert.equal(chips, 8, `expected 8 non-image artifact chips, got ${chips}`);
 
   // all thumbnails actually load (no broken images)
   await page.waitForFunction(() => {

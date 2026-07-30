@@ -50,7 +50,7 @@ name = "disp{int(per_channel)}"
 paths = ["{ser_path.as_posix()}"]
 [align]
 per_channel = {str(per_channel).lower()}
-[lucky]
+[local_lucky]
 crossover_wavelength_pixels = 8.0
 isoplanatic_patch_pixels = 16.0
 [output]
@@ -71,7 +71,7 @@ def test_per_channel_removes_dispersion(tmp_path: Path) -> None:
         runs[per_channel] = CliRun(proc, parse_events(proc.stdout), 0.0)
 
     def spread(run: CliRun) -> float:
-        avg = np.load(run.run_dir / "stages/lucky/unweighted_average.npy")
+        avg = np.load(run.run_dir / "stages/local_lucky/unweighted_average.npy")
         cent = _channel_centroids(avg)
         return float(np.linalg.norm(cent - cent.mean(axis=0), axis=1).max())
 
@@ -117,7 +117,7 @@ name = "mono"
 paths = ["{ser_path.as_posix()}"]
 [align]
 per_channel = true
-[lucky]
+[local_lucky]
 crossover_wavelength_pixels = 6.0
 isoplanatic_patch_pixels = 10.0
 [output]

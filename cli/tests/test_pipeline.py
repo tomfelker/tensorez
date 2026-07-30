@@ -26,7 +26,7 @@ def test_end_to_end_jsonl(synthetic_runs: SyntheticRuns) -> None:
     assert ts == sorted(ts), "event timestamps must be monotonic"
 
     stages = [e["stage"] for e in run.events_of("stage_start")]
-    assert stages == ["lights", "align", "lucky", "output"]
+    assert stages == ["lights", "align", "local_lucky", "output"]
     ends = [e["stage"] for e in run.events_of("stage_end")]
     assert ends == stages
 
@@ -61,7 +61,7 @@ def test_lucky_beats_unweighted_average(synthetic_runs: SyntheticRuns) -> None:
     than the unweighted aligned average of the same frames."""
     run = synthetic_runs.first
     final = np.load(run.run_dir / "final.npy")
-    average = np.load(run.run_dir / "stages/lucky/unweighted_average.npy")
+    average = np.load(run.run_dir / "stages/local_lucky/unweighted_average.npy")
     truth = np.load(TRUTH_NPY)
 
     h, w = final.shape[:2]
@@ -84,12 +84,13 @@ def test_second_run_uses_cache(synthetic_runs: SyntheticRuns) -> None:
     assert cached_flags(first)["align"] is False
     assert cached_flags(second)["align"] is True
 
-    lucky_second = [e for e in second.events_of("stage_start") if e["stage"] == "lucky"][0]
+    lucky_second = [e for e in second.events_of("stage_start")
+                    if e["stage"] == "local_lucky"][0]
     assert lucky_second["pass1_cached"] is True
     # cached stages emit no progress events
     assert not [e for e in second.events_of("progress") if e["stage"] == "align"]
     # pass 1 is skipped: only pass 2 progress remains
-    lucky_progress = [e for e in second.events_of("progress") if e["stage"] == "lucky"]
+    lucky_progress = [e for e in second.events_of("progress") if e["stage"] == "local_lucky"]
     assert all("pass 2" in e.get("message", "") for e in lucky_progress)
 
     # Compare the pipeline's own reported time (the `done` event), not subprocess
@@ -106,17 +107,17 @@ def test_second_run_uses_cache(synthetic_runs: SyntheticRuns) -> None:
 
 
 def test_selection_change_reuses_pass1_stats(synthetic_runs: SyntheticRuns) -> None:
-    """(d) Changing only [lucky] stdevs_above_mean reuses the pass-1 stats cache."""
+    """(d) Changing only [local_lucky] stdevs_above_mean reuses the pass-1 stats cache."""
     validate = synthetic_runs.reselect_validate
     result = [e for e in validate.events if e["event"] == "validate_result"][0]
     cached = {s["stage"]: s["cached"] for s in result["stages"]}
     assert cached["align"] is True
-    assert cached["lucky_stats"] is True
+    assert cached["local_lucky_stats"] is True
 
     run = synthetic_runs.reselect
-    lucky = [e for e in run.events_of("stage_start") if e["stage"] == "lucky"][0]
+    lucky = [e for e in run.events_of("stage_start") if e["stage"] == "local_lucky"][0]
     assert lucky["pass1_cached"] is True
-    lucky_progress = [e for e in run.events_of("progress") if e["stage"] == "lucky"]
+    lucky_progress = [e for e in run.events_of("progress") if e["stage"] == "local_lucky"]
     assert all("pass 2" in e.get("message", "") for e in lucky_progress)
 
     # different selection -> different result than the original run

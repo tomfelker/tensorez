@@ -12,14 +12,23 @@ paths = ["../../data/jupiter_mvi_6906/????????.png"]
 center_of_mass = true
 crop = [400, 400]
 
-[lucky]
-algorithm = "frequency_bands"
+# Whole-frame lucky scores (cached); ranks frames for [lucky_stack] and
+# [mfbd] frames = "lucky_top".
+[lucky_scoring]
+metric = "fourier_bandpass"
+min_wavelength_pixels = 5.0
+max_wavelength_pixels = 50.0
+
+# Classic lucky imaging: plain stacks of the best ceil(f * N) frames,
+# one output per fraction (1.0 would be the mean of everything).
+[lucky_stack]
+top_fractions = [0.1, 0.5]
+
+# Per-pixel lucky stacking (best for extended scenes; final.* when no [mfbd]).
+[local_lucky]
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 30.0
 isoplanatic_patch_pixels = 50.0
-channel_crosstalk = 0.0
-
-selection = "sigmoid"
 stdevs_above_mean = 2.0
 steepness = 3.0
 
@@ -28,9 +37,9 @@ steepness = 3.0
 # author's Celestron CPC 1100 (27.94 cm, 9.5 cm obstruction, 2800 mm).
 # Pixel scale: EITHER pixel_scale_arcsec directly, OR pixel_size_um
 # (+ focal_length_mm, barlow) to compute it — never both:
-# [deconv]
-# frames = "lucky_top"            # or "all"
-# top_n = 12
+# [mfbd]
+# frames = "lucky_top"            # or "all"; lucky_top needs [lucky_scoring]
+# top_n = 12                      # count of luckiest frames, or top_fraction = 0.1
 # # diameter_cm = 27.94           # override for a different telescope
 # # central_obscuration_cm = 9.5
 # focal_length_mm = 2800.0

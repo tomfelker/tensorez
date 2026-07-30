@@ -87,9 +87,44 @@ export const SCHEMA = [
     ],
   },
   {
-    section: 'lucky',
-    label: 'Lucky',
-    help: 'Frequency-band luckiness weighting and frame selection.',
+    section: 'lucky_scoring',
+    label: 'Lucky scoring',
+    optionalSection: true,
+    defaultOn: true,
+    help: 'Whole-frame luckiness: one cached scalar score per frame. Required by ' +
+      'Lucky stack, and by MFBD with frames = lucky_top.',
+    fields: [
+      { key: 'metric', type: 'enum', options: ['fourier_bandpass', 'image_squared'],
+        default: 'fourier_bandpass',
+        help: 'fourier_bandpass: mean FFT magnitude in the band below. ' +
+          'image_squared: Muller & Buffington 1974 sharpness (no parameters)' },
+      { key: 'min_wavelength_pixels', type: 'float', default: 5.0, min: 1, max: 256,
+        logStep: true, help: 'fine-detail edge of the band (above the noise floor)',
+        showIf: (s) => s.metric !== 'image_squared' },
+      { key: 'max_wavelength_pixels', type: 'float', default: 50.0, min: 2, max: 1024,
+        logStep: true, help: 'coarse edge of the band (below the object scale)',
+        showIf: (s) => s.metric !== 'image_squared' },
+    ],
+  },
+  {
+    section: 'lucky_stack',
+    label: 'Lucky stack',
+    optionalSection: true,
+    help: 'Classic lucky imaging: a plain average of the best ceil(f·N) frames, ' +
+      'one product per fraction. Requires Lucky scoring.',
+    fields: [
+      { key: 'top_fractions', type: 'floatlist', default: [0.1],
+        help: 'fractions in (0, 1]; 1.0 = mean of everything. First listed becomes ' +
+          'final.* when no fancier producer is enabled' },
+    ],
+  },
+  {
+    section: 'local_lucky',
+    label: 'Local lucky',
+    optionalSection: true,
+    defaultOn: true,
+    help: 'Per-pixel lucky stacking (frequency-band luckiness) — great for extended ' +
+      'scenes like the Moon. Becomes final.* unless MFBD is enabled.',
     fields: [
       { key: 'algorithm', type: 'enum', options: ['frequency_bands'], default: 'frequency_bands' },
       { key: 'noise_wavelength_pixels', type: 'float', default: 2.0, min: 0.5, max: 64,
@@ -100,35 +135,30 @@ export const SCHEMA = [
         logStep: true, help: 'spatial smoothing scale of luckiness' },
       { key: 'channel_crosstalk', type: 'float', default: 0.0, min: 0, max: 1, step: 0.05,
         help: '0 = per-channel luck, 1 = min across channels' },
-      { key: 'selection', type: 'enum', options: ['sigmoid', 'top_k'], default: 'sigmoid',
-        help: 'top_k is planned, not yet in the CLI' },
       { key: 'stdevs_above_mean', type: 'float', default: 2.5, min: -5, max: 10, step: 0.1,
-        help: 'sigmoid gate center, in σ of per-pixel luck',
-        showIf: (s) => s.selection !== 'top_k' },
+        help: 'sigmoid gate center, in σ of per-pixel luck' },
       { key: 'steepness', type: 'float', default: 3.0, min: 0.1, max: 50, step: 0.1,
-        help: 'sigmoid gate sharpness',
-        showIf: (s) => s.selection !== 'top_k' },
-      { key: 'top_fraction', type: 'float', optional: true, default: 0.05, min: 0.001, max: 1,
-        step: 0.01, help: 'top_k variant, when implemented',
-        showIf: (s) => s.selection === 'top_k' },
+        help: 'sigmoid gate sharpness' },
     ],
   },
   {
-    section: 'deconv',
-    label: 'Deconv',
+    section: 'mfbd',
+    label: 'MFBD',
     optionalSection: true,
-    help: 'Optional multi-frame blind deconvolution (torchmfbd). Requires a square ' +
-      '[align] crop. When enabled, final.* is the deconvolution and the lucky stack ' +
-      'is published as stages/lucky/lucky_stack.*',
+    help: 'Optional multi-frame blind deconvolution (torchmfbd) of the luckiest ' +
+      'frames. Requires a square [align] crop. When enabled, its product is final.*',
     validate: (s) => {
       const problems = [];
       if ('pixel_scale_arcsec' in s && 'pixel_size_um' in s) {
-        problems.push('deconv: specify either pixel_scale_arcsec or the camera keys ' +
+        problems.push('mfbd: specify either pixel_scale_arcsec or the camera keys ' +
           '(focal_length_mm/barlow/pixel_size_um), never both');
       }
       if (!('pixel_scale_arcsec' in s) && !('pixel_size_um' in s) &&
           ('focal_length_mm' in s || 'barlow' in s)) {
-        problems.push('deconv: camera mode needs pixel_size_um (it has no default)');
+        problems.push('mfbd: camera mode needs pixel_size_um (it has no default)');
+      }
+      if ('top_n' in s && 'top_fraction' in s) {
+        problems.push('mfbd: top_n and top_fraction are mutually exclusive (CLI hard error)');
       }
       return problems;
     },
@@ -136,9 +166,12 @@ export const SCHEMA = [
       { key: 'method', type: 'enum', options: ['torchmfbd'], default: 'torchmfbd',
         help: 'only value in v0' },
       { key: 'frames', type: 'enum', options: ['lucky_top', 'all'], default: 'lucky_top',
-        help: 'lucky_top: top_n frames by luckiness score' },
+        help: 'lucky_top: luckiest frames per Lucky scoring' },
       { key: 'top_n', type: 'int', default: 12, min: 1,
         help: 'number of luckiest frames fed to the deconvolution',
+        showIf: (s) => s.frames !== 'all' && !('top_fraction' in s) },
+      { key: 'top_fraction', type: 'float', optional: true, default: 0.1, min: 0.001, max: 1,
+        step: 0.01, help: 'fraction of all frames instead of a count (replaces top_n)',
         showIf: (s) => s.frames !== 'all' },
       { key: 'diameter_cm', type: 'float', default: 27.94, min: 0.1, logStep: true,
         help: 'telescope aperture (default: Celestron C11)' },
@@ -188,11 +221,13 @@ export const SCHEMA = [
   },
 ];
 
-// Fresh recipe with all default values (optional sections/fields omitted).
+// Fresh recipe with all default values. Optional sections/fields are omitted,
+// except sections marked defaultOn (a fresh recipe must include at least one
+// producer or the CLI refuses it).
 export function defaultRecipe() {
   const out = {};
   for (const sec of SCHEMA) {
-    if (sec.optionalSection) continue;
+    if (sec.optionalSection && !sec.defaultOn) continue;
     const t = {};
     for (const f of sec.fields) {
       if (f.optional) continue;
@@ -252,6 +287,18 @@ export function validateRecipe(obj) {
       if (err) problems.push(`${secName}.${k}: ${err}`);
     }
     if (sec.validate) problems.push(...sec.validate(secVal));
+  }
+  // cross-section rules (the CLI enforces the same as hard errors)
+  if (!['local_lucky', 'lucky_stack', 'mfbd'].some((p) => p in obj)) {
+    problems.push('nothing produces an output: enable at least one of local_lucky, ' +
+      'lucky_stack, or mfbd (CLI hard error)');
+  }
+  if ('lucky_stack' in obj && !('lucky_scoring' in obj)) {
+    problems.push('lucky_stack requires lucky_scoring (CLI hard error)');
+  }
+  if ('mfbd' in obj && (obj.mfbd?.frames ?? 'lucky_top') === 'lucky_top' &&
+      !('lucky_scoring' in obj)) {
+    problems.push('mfbd with frames = "lucky_top" requires lucky_scoring (CLI hard error)');
   }
   return problems;
 }

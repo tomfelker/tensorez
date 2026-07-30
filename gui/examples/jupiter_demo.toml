@@ -18,17 +18,24 @@ crop = [512, 512]
 crop_align = 2
 crop_offsets = [0, 0]
 
-[lucky]
+[lucky_scoring]
+metric = "fourier_bandpass"
+min_wavelength_pixels = 5.0
+max_wavelength_pixels = 50.0
+
+[lucky_stack]
+top_fractions = [0.1]
+
+[local_lucky]
 algorithm = "frequency_bands"
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 35.0
 isoplanatic_patch_pixels = 55.0
 channel_crosstalk = 0.0
-selection = "sigmoid"
 stdevs_above_mean = 2.5
 steepness = 3.0
 
-[deconv]
+[mfbd]
 method = "torchmfbd"
 frames = "lucky_top"
 top_n = 12

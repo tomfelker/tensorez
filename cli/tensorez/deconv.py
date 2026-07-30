@@ -51,7 +51,7 @@ from typing import Callable
 import numpy as np
 import torch
 
-from .recipe import DeconvConfig
+from .recipe import MfbdConfig
 
 ProgressCallback = Callable[[int, int, float | None], None]
 LogCallback = Callable[[str, str], None]
@@ -70,11 +70,11 @@ def overfill_factor(wavelength_nm: float, diameter_cm: float, pixel_scale_arcsec
     return 206265.0 * wavelength_cm / (diameter_cm * pixel_scale_arcsec)
 
 
-def check_optics(cfg: DeconvConfig, channels: int, log: LogCallback) -> None:
+def check_optics(cfg: MfbdConfig, channels: int, log: LogCallback) -> None:
     """Validate the physical setup; raises ValueError on impossible configs."""
     if len(cfg.wavelengths_nm) != channels:
         raise ValueError(
-            f"[deconv] wavelengths_nm has {len(cfg.wavelengths_nm)} entries but the "
+            f"[mfbd] wavelengths_nm has {len(cfg.wavelengths_nm)} entries but the "
             f"image has {channels} channel(s) — provide one wavelength per channel"
         )
     for w in cfg.wavelengths_nm:
@@ -83,7 +83,7 @@ def check_optics(cfg: DeconvConfig, channels: int, log: LogCallback) -> None:
         if overfill < 1.0:
             max_pix = 206265.0 * w * 1e-7 / cfg.diameter_cm
             raise ValueError(
-                f"[deconv] pixel_scale_arcsec={cfg.pixel_scale_arcsec} is too coarse to model "
+                f"[mfbd] pixel_scale_arcsec={cfg.pixel_scale_arcsec} is too coarse to model "
                 f"a {cfg.diameter_cm} cm aperture at {w} nm (lambda/D = {diffraction_arcsec:.3f}\"); "
                 f"needs <= {max_pix:.3f} arcsec/pixel"
             )
@@ -96,7 +96,7 @@ def check_optics(cfg: DeconvConfig, channels: int, log: LogCallback) -> None:
             )
 
 
-def _build_config(cfg: DeconvConfig, n_pixel: int) -> dict:
+def _build_config(cfg: MfbdConfig, n_pixel: int) -> dict:
     config: dict = {
         "telescope": {
             "diameter": cfg.diameter_cm,
@@ -163,7 +163,7 @@ class _CapturingTqdm:
 
 def run_torchmfbd(
     frames_nchw: torch.Tensor,
-    cfg: DeconvConfig,
+    cfg: MfbdConfig,
     basis_dir: Path,
     progress: ProgressCallback | None = None,
     log: LogCallback | None = None,
@@ -181,7 +181,7 @@ def run_torchmfbd(
 
     n, channels, h, w = frames_nchw.shape
     if h != w:
-        raise ValueError(f"[deconv] requires a square crop; got {w}x{h} — set [align] crop")
+        raise ValueError(f"[mfbd] requires a square crop; got {w}x{h} — set [align] crop")
 
     check_optics(cfg, channels, log)
 

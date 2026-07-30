@@ -29,8 +29,8 @@ inside resolves against the shell cwd). The GUI finds Python via
 - GUI: `cd gui && npm test`. Playwright/headless Chromium
   (`npx playwright install chromium` once). `pretest` auto-runs
   `scripts/gen-mock.mjs` which writes `gui/mockrun/` + mock event streams.
-- The `real` and `deconv` GUI tests replay actual CLI output: they need
-  completed runs of `cli/examples/jupiter.toml` and `jupiter_deconv.toml`
+- The `real` and `mfbd` GUI tests replay actual CLI output: they need
+  completed runs of `cli/examples/jupiter.toml` and `jupiter_mfbd.toml`
   (run from `cli/`; outputs land in `cli/output/`, gitignored). They fail with
   a "run the CLI first" message otherwise.
 - GUI tests rewrite `gui/screenshots/` on every run — untracked on purpose.

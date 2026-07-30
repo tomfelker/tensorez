@@ -70,7 +70,7 @@ paths = ["{SYNTHETIC_SER.as_posix()}"]
 center_of_mass = true
 crop = [192, 192]
 
-[lucky]
+[local_lucky]
 crossover_wavelength_pixels = 30.0
 isoplanatic_patch_pixels = 50.0
 stdevs_above_mean = {stdevs_above_mean}

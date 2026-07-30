@@ -1,27 +1,43 @@
-"""The fixed pipeline: lights -> darks -> align -> lucky -> output.
+"""The fixed pipeline:
+
+    lights -> darks -> align -> lucky_scoring? -> {local_lucky?, lucky_stack?, mfbd?} -> output
 
 Streaming design: no stage ever holds more than a handful of frames in
-memory.  The lucky stage is the two-pass scheme from the reference
-implementation's ``local_lucky.py``:
+memory.  After calibration and alignment there are three independent
+producers, each optional, each yielding a single image:
 
-* Pass 1 walks all frames computing each frame's per-pixel luckiness and
-  feeds it into a Welford accumulator, yielding the per-pixel mean and
-  standard deviation of luckiness over time.
-* Pass 2 walks the frames again, recomputes each frame's luckiness, converts
-  it to a z-score against the pass-1 statistics, gates it through a sigmoid
-  (``weight = sigmoid((z - stdevs_above_mean) * steepness)``), and
-  accumulates ``sum(weight * frame) / sum(weight)`` — "the average of all
-  pixels more than N standard deviations luckier than the mean".
+* ``local_lucky`` — per-pixel lucky stacking, the two-pass scheme from the
+  reference implementation's ``local_lucky.py``:
 
-Pass-1 statistics (and the aligned unweighted average, which the luckiness
-metric needs as its "known" reference) are cached, so tweaking only the
-selection knobs reruns pass 2 alone.
+  - Pass 1 walks all frames computing each frame's per-pixel luckiness and
+    feeds it into a Welford accumulator, yielding the per-pixel mean and
+    standard deviation of luckiness over time.
+  - Pass 2 walks the frames again, recomputes each frame's luckiness,
+    converts it to a z-score against the pass-1 statistics, gates it through
+    a sigmoid (``weight = sigmoid((z - stdevs_above_mean) * steepness)``),
+    and accumulates ``sum(weight * frame) / sum(weight)`` — "the average of
+    all pixels more than N standard deviations luckier than the mean".
+
+  Pass-1 statistics (and the aligned unweighted average, which the luckiness
+  metric needs as its "known" reference) are cached, so tweaking only the
+  selection knobs reruns pass 2 alone.
+
+* ``lucky_stack`` — classic whole-frame lucky imaging: plain averages of the
+  best ceil(fraction * N) frames, one output per requested fraction.
+
+* ``mfbd`` — multi-frame blind deconvolution (torchmfbd) of the luckiest N
+  (or all) frames.
+
+The latter two rank frames by the ``lucky_scoring`` stage — a cached scalar
+score per frame (see scoring.py).  ``final.*`` is the fanciest enabled
+product: mfbd, else local_lucky, else the first-listed lucky_stack fraction.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import json
+import math
 import os
 import shutil
 import time
@@ -45,6 +61,7 @@ from .events import EventEmitter
 from .luckiness import FrequencyBands, FrequencyBandsParams
 from .observation import AlignParams, Observation
 from .recipe import Recipe
+from .scoring import FrameScorer, ScoringParams
 from .sequence import ImageSequence
 from .welford import Welford
 
@@ -57,6 +74,11 @@ class PipelineError(RuntimeError):
 
 def _utc_timestamp() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+
+
+def _fraction_label(fraction: float) -> str:
+    """0.05 -> 'p5', 0.125 -> 'p12_5', 1.0 -> 'p100' (percent, TOML-name safe)."""
+    return "p" + f"{fraction * 100:g}".replace(".", "_")
 
 
 class Pipeline:
@@ -119,11 +141,17 @@ class Pipeline:
         key += self._align_params().identity()
         return key
 
-    def _lucky_stats_key(self, align_entry: CacheEntry) -> str:
+    def _scoring_key(self, align_entry: CacheEntry) -> str:
         return (
-            "stage: lucky_stats\n"
-            f"align_key: {align_entry.key_hash}\n" + self._lucky_params().identity()
-            + "stats: mean, stdev, frame_scores (v2)\n"
+            "stage: lucky_scoring\n"
+            f"align_key: {align_entry.key_hash}\n" + self._scoring_params().identity()
+        )
+
+    def _local_lucky_stats_key(self, align_entry: CacheEntry) -> str:
+        return (
+            "stage: local_lucky_stats\n"
+            f"align_key: {align_entry.key_hash}\n" + self._local_lucky_params().identity()
+            + "stats: mean, stdev\n"
         )
 
     def _align_params(self) -> AlignParams:
@@ -136,13 +164,23 @@ class Pipeline:
             crop_offsets=a.crop_offsets,
         )
 
-    def _lucky_params(self) -> FrequencyBandsParams:
-        l = self.recipe.lucky
+    def _local_lucky_params(self) -> FrequencyBandsParams:
+        l = self.recipe.local_lucky
+        assert l is not None
         return FrequencyBandsParams(
             noise_wavelength_pixels=l.noise_wavelength_pixels,
             crossover_wavelength_pixels=l.crossover_wavelength_pixels,
             isoplanatic_patch_pixels=l.isoplanatic_patch_pixels,
             channel_crosstalk=l.channel_crosstalk,
+        )
+
+    def _scoring_params(self) -> ScoringParams:
+        sc = self.recipe.lucky_scoring
+        assert sc is not None
+        return ScoringParams(
+            metric=sc.metric,
+            min_wavelength_pixels=sc.min_wavelength_pixels,
+            max_wavelength_pixels=sc.max_wavelength_pixels,
         )
 
     def _sequences(self) -> tuple[ImageSequence, ImageSequence | None]:
@@ -179,8 +217,16 @@ class Pipeline:
             stages.append({"stage": "darks", "cached": darks_entry.complete})
         align_entry = CacheEntry(self.cache_dir, "align", self._align_key(lights, darks_entry))
         stages.append({"stage": "align", "cached": align_entry.complete})
-        stats_entry = CacheEntry(self.cache_dir, "lucky_stats", self._lucky_stats_key(align_entry))
-        stages.append({"stage": "lucky_stats", "cached": stats_entry.complete})
+        if self.recipe.lucky_scoring is not None:
+            scoring_entry = CacheEntry(
+                self.cache_dir, "lucky_scoring", self._scoring_key(align_entry)
+            )
+            stages.append({"stage": "lucky_scoring", "cached": scoring_entry.complete})
+        if self.recipe.local_lucky is not None:
+            stats_entry = CacheEntry(
+                self.cache_dir, "local_lucky_stats", self._local_lucky_stats_key(align_entry)
+            )
+            stages.append({"stage": "local_lucky_stats", "cached": stats_entry.complete})
         return {
             "recipe": self.recipe.resolved_dict(),
             "frame_count": len(lights),
@@ -238,10 +284,31 @@ class Pipeline:
         )
         average_image, align_entry = self._run_align(obs, darks_entry)
 
-        result, frame_scores = self._run_lucky(obs, average_image, align_entry)
+        scores: np.ndarray | None = None
+        if recipe.lucky_scoring is not None:
+            scores = self._run_scoring(obs, align_entry)
 
-        if recipe.deconv is not None:
-            result = self._run_deconv(obs, frame_scores)
+        local_image: torch.Tensor | None = None
+        if recipe.local_lucky is not None:
+            local_image = self._run_local_lucky(obs, average_image, align_entry)
+
+        stack_products: list[tuple[str, torch.Tensor]] = []
+        if recipe.lucky_stack is not None:
+            assert scores is not None  # recipe validation guarantees scoring
+            stack_products = self._run_lucky_stack(obs, scores)
+
+        mfbd_image: torch.Tensor | None = None
+        if recipe.mfbd is not None:
+            mfbd_image = self._run_mfbd(obs, scores)
+
+        # final.* is the fanciest enabled product; the others remain available
+        # as their stages/<stage>/ artifacts.
+        if mfbd_image is not None:
+            result = mfbd_image
+        elif local_image is not None:
+            result = local_image
+        else:
+            result = stack_products[0][1]
 
         with self.stage("output", cached=False):
             write_npy(self.run_dir / "final.npy", result)
@@ -364,71 +431,98 @@ class Pipeline:
             entry.mark_complete()
         return average.mean, entry
 
-    # -- lucky --------------------------------------------------------------
+    # -- products -----------------------------------------------------------
 
-    def _run_lucky(
+    def _publish_product(self, stage: str, name: str, image: torch.Tensor) -> None:
+        """A producer's named output: 16-bit TIFF + preview under its stage."""
+        rel = f"stages/{stage}/{name}.tif"
+        w, h = write_tiff16(self.run_dir / rel, image)
+        self.artifact(stage, name, "image", rel, width=w, height=h)
+        self.preview(stage, name, image)
+
+    # -- lucky scoring ------------------------------------------------------
+
+    def _run_scoring(self, obs: Observation, align_entry: CacheEntry) -> np.ndarray:
+        """Whole-frame scalar luckiness, one score per frame (cached)."""
+        entry = CacheEntry(self.cache_dir, "lucky_scoring", self._scoring_key(align_entry))
+        total = len(obs)
+        cached = entry.complete
+        with self.stage("lucky_scoring", cached=cached):
+            if cached:
+                scores = entry.load_npz("scores")["scores"]
+            else:
+                metric = self.recipe.lucky_scoring.metric
+                first, _ = obs.read_cooked(0)
+                scorer = FrameScorer(first.shape[-2], first.shape[-1], self._scoring_params())
+                values: list[float] = []
+                for i in range(total):
+                    image, _ = obs.read_cooked(i)
+                    values.append(scorer.score(image))
+                    self.emitter.progress(
+                        "lucky_scoring", i + 1, total, message=f"scoring frames ({metric})"
+                    )
+                scores = np.asarray(values, dtype=np.float32)
+                entry.save_npz("scores", scores=scores)
+                entry.mark_complete()
+
+            rel = "stages/lucky_scoring/frame_scores.npy"
+            (self.run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+            np.save(self.run_dir / rel, scores)
+            self.artifact("lucky_scoring", "frame_scores", "array", rel)
+            best = np.argsort(scores)[::-1][: min(10, total)]
+            self.emitter.log(
+                "lucky_scoring: best frames: "
+                + ", ".join(f"{int(i)} ({scores[i]:.6g})" for i in best)
+            )
+        return scores
+
+    # -- local lucky --------------------------------------------------------
+
+    def _run_local_lucky(
         self, obs: Observation, average_image: torch.Tensor, align_entry: CacheEntry
-    ) -> tuple[torch.Tensor, np.ndarray]:
-        """Two-pass lucky stacking.  Returns (stacked image, per-frame scores).
-
-        The scalar score of frame *i* is the spatial mean of its luckiness
-        map — a ranking of whole frames that the optional deconv stage uses
-        to pick its top-N input frames.  Scores are cached with the pass-1
-        statistics and published as ``frame_scores.npy``.
-        """
+    ) -> torch.Tensor:
+        """Two-pass per-pixel lucky stacking."""
         recipe = self.recipe
+        cfg = recipe.local_lucky
+        assert cfg is not None
         debug_frames = recipe.output.debug_frames
-        stats_entry = CacheEntry(self.cache_dir, "lucky_stats", self._lucky_stats_key(align_entry))
+        stats_entry = CacheEntry(
+            self.cache_dir, "local_lucky_stats", self._local_lucky_stats_key(align_entry)
+        )
         pass1_cached = stats_entry.complete
 
         h, w = average_image.shape[-2], average_image.shape[-1]
-        algo = FrequencyBands(h, w, self._lucky_params(), average_image)
+        algo = FrequencyBands(h, w, self._local_lucky_params(), average_image)
         total = len(obs)
 
-        with self.stage("lucky", cached=False, pass1_cached=pass1_cached):
-            self.preview("lucky", "unweighted_average", average_image)
-            rel = "stages/lucky/unweighted_average.npy"
+        with self.stage("local_lucky", cached=False, pass1_cached=pass1_cached):
+            self.preview("local_lucky", "unweighted_average", average_image)
+            rel = "stages/local_lucky/unweighted_average.npy"
             write_npy(self.run_dir / rel, average_image)
-            self.artifact("lucky", "unweighted_average", "array", rel)
+            self.artifact("local_lucky", "unweighted_average", "array", rel)
 
             if pass1_cached:
-                self.emitter.log("lucky: pass 1 statistics loaded from cache")
+                self.emitter.log("local_lucky: pass 1 statistics loaded from cache")
                 stats = stats_entry.load_npz("stats")
                 luck_mean = torch.from_numpy(stats["mean"])
                 luck_stdev = torch.from_numpy(stats["stdev"])
-                frame_scores = stats["frame_scores"]
             else:
                 welford = Welford()
-                scores: list[float] = []
                 for i in range(total):
                     image, dark_variance = obs.read_cooked(i)
                     luckiness = algo.compute(image, dark_variance)
                     welford.update(luckiness)
-                    scores.append(float(luckiness.mean()))
                     if i < debug_frames:
-                        self.preview("lucky", f"luckiness_{i:08d}", luckiness,
+                        self.preview("local_lucky", f"luckiness_{i:08d}", luckiness,
                                      normalize=True, frame=i)
-                    self.emitter.progress("lucky", i + 1, total, message="pass 1/2: luckiness statistics")
+                    self.emitter.progress("local_lucky", i + 1, total,
+                                          message="pass 1/2: luckiness statistics")
                 luck_mean, luck_stdev = welford.mean, welford.stdev
-                frame_scores = np.asarray(scores, dtype=np.float32)
-                stats_entry.save_npz(
-                    "stats", mean=luck_mean.numpy(), stdev=luck_stdev.numpy(),
-                    frame_scores=frame_scores,
-                )
+                stats_entry.save_npz("stats", mean=luck_mean.numpy(), stdev=luck_stdev.numpy())
                 stats_entry.mark_complete()
 
-            rel = "stages/lucky/frame_scores.npy"
-            (self.run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-            np.save(self.run_dir / rel, frame_scores)
-            self.artifact("lucky", "frame_scores", "array", rel)
-            best = np.argsort(frame_scores)[::-1][: min(10, total)]
-            self.emitter.log(
-                "lucky: best frames by mean luckiness: "
-                + ", ".join(f"{int(i)} ({frame_scores[i]:.4f})" for i in best)
-            )
-
-            self.preview("lucky", "luckiness_mean", luck_mean, normalize=True)
-            self.preview("lucky", "luckiness_stdev", luck_stdev, normalize=True)
+            self.preview("local_lucky", "luckiness_mean", luck_mean, normalize=True)
+            self.preview("local_lucky", "luckiness_stdev", luck_stdev, normalize=True)
 
             # Bilinearly-demosaiced Bayer sources: weight each pixel only by
             # channels the sensor actually sampled there, so interpolated
@@ -442,7 +536,6 @@ class Pipeline:
                 base_mask = bayer_mask(obs.lights.color_id, first.shape[-2], first.shape[-1])
 
             # Pass 2: sigmoid-gated weighted average.
-            selection = recipe.lucky
             weighted_sum: torch.Tensor | None = None
             total_weight: torch.Tensor | None = None
             for i in range(total):
@@ -453,78 +546,116 @@ class Pipeline:
                     (luckiness - luck_mean) / luck_stdev,
                     torch.zeros_like(luckiness),
                 )
-                weight = torch.sigmoid((z - selection.stdevs_above_mean) * selection.steepness)
+                weight = torch.sigmoid((z - cfg.stdevs_above_mean) * cfg.steepness)
                 if base_mask is not None:
                     sample_mask = apply_crop(
                         apply_frame_shift(base_mask, obs.shifts[i]), obs.rect_for(base_mask)
                     )
                     weight = weight * sample_mask
                 if i < debug_frames:
-                    self.preview("lucky", f"weight_{i:08d}", weight, normalize=True, frame=i)
+                    self.preview("local_lucky", f"weight_{i:08d}", weight,
+                                 normalize=True, frame=i)
                 if weighted_sum is None:
                     weighted_sum = torch.zeros_like(image)
                     total_weight = torch.zeros_like(weight)
                 weighted_sum += weight * image
                 total_weight += weight
-                self.emitter.progress("lucky", i + 1, total, message="pass 2/2: weighted stack")
+                self.emitter.progress("local_lucky", i + 1, total,
+                                      message="pass 2/2: weighted stack")
 
             assert weighted_sum is not None and total_weight is not None
             result = torch.where(
                 total_weight > 0, weighted_sum / total_weight, torch.zeros_like(weighted_sum)
             )
-            self.preview("lucky", "total_weight", total_weight, normalize=True)
+            self.preview("local_lucky", "total_weight", total_weight, normalize=True)
             avg_frames = float(total_weight.mean())
             self.emitter.log(
-                f"lucky: average effective frames per pixel: {avg_frames:.2f} of {total}"
+                f"local_lucky: average effective frames per pixel: {avg_frames:.2f} of {total}"
             )
+            self._publish_product("local_lucky", "local_lucky", result)
+        return result
 
-            if recipe.deconv is not None:
-                # Deconvolution will take over final.*; keep the lucky stack
-                # available for comparison as named artifacts.
-                rel = "stages/lucky/lucky_stack.tif"
-                w2, h2 = write_tiff16(self.run_dir / rel, result)
-                self.artifact("lucky", "lucky_stack", "image", rel, width=w2, height=h2)
-                self.preview("lucky", "lucky_stack", result)
-        return result, frame_scores
+    # -- lucky stack --------------------------------------------------------
 
-    # -- deconv -------------------------------------------------------------
-
-    def _run_deconv(self, obs: Observation, frame_scores: np.ndarray) -> torch.Tensor:
-        """Multi-frame blind deconvolution of the luckiest aligned frames.
-
-        Selects the top-N frames by their pass-1 luckiness score (or all
-        frames), feeds the same aligned/cropped cooked frames the luckiness
-        was computed on to torchmfbd, and returns the reconstructed object,
-        which becomes the run's final result.  Not cached: it *is* the final
-        product (the frame selection comes free from the cached stats).
-        """
-        from .deconv import psf_examples_image, run_torchmfbd
-
-        cfg = self.recipe.deconv
+    def _run_lucky_stack(
+        self, obs: Observation, scores: np.ndarray
+    ) -> list[tuple[str, torch.Tensor]]:
+        """Classic lucky imaging: plain average of the best ceil(f*N) frames,
+        one output per requested fraction.  A single cumulative pass over the
+        ranked frames serves every fraction."""
+        cfg = self.recipe.lucky_stack
         assert cfg is not None
         total = len(obs)
 
-        with self.stage("deconv", cached=False):
+        with self.stage("lucky_stack", cached=False):
+            order = np.argsort(scores)[::-1]
+            counts = {f: max(1, min(total, math.ceil(f * total))) for f in cfg.top_fractions}
+            boundaries: dict[int, list[float]] = {}
+            for f, c in counts.items():
+                boundaries.setdefault(c, []).append(f)
+            max_count = max(counts.values())
+
+            running: torch.Tensor | None = None
+            snapshots: dict[float, torch.Tensor] = {}
+            for rank in range(max_count):
+                image, _ = obs.read_cooked(int(order[rank]))
+                running = image.clone() if running is None else running + image
+                for f in boundaries.get(rank + 1, ()):
+                    snapshots[f] = running / (rank + 1)
+                self.emitter.progress("lucky_stack", rank + 1, max_count,
+                                      message="stacking luckiest frames")
+
+            products: list[tuple[str, torch.Tensor]] = []
+            for f in cfg.top_fractions:
+                name = f"lucky_stack_{_fraction_label(f)}"
+                self.emitter.log(
+                    f"lucky_stack: {name} = best {counts[f]} of {total} frame(s)"
+                )
+                self._publish_product("lucky_stack", name, snapshots[f])
+                products.append((name, snapshots[f]))
+        return products
+
+    # -- mfbd ---------------------------------------------------------------
+
+    def _run_mfbd(self, obs: Observation, scores: np.ndarray | None) -> torch.Tensor:
+        """Multi-frame blind deconvolution of the luckiest aligned frames.
+
+        Selects the top frames by lucky score — a count (top_n) or a fraction
+        of all frames (top_fraction) — or takes every frame, feeds the
+        aligned/cropped cooked frames to torchmfbd, and returns the
+        reconstructed object.  Not cached: it *is* a final product.
+        """
+        from .deconv import psf_examples_image, run_torchmfbd
+
+        cfg = self.recipe.mfbd
+        assert cfg is not None
+        total = len(obs)
+
+        with self.stage("mfbd", cached=False):
             if cfg.frames == "all":
                 selected = list(range(total))
             else:
-                top_n = cfg.top_n
+                assert scores is not None  # recipe validation guarantees scoring
+                if cfg.top_fraction is not None:
+                    top_n = max(1, math.ceil(cfg.top_fraction * total))
+                else:
+                    top_n = cfg.top_n
                 if top_n > total:
                     self.emitter.log(
-                        f"deconv: top_n={top_n} exceeds the {total} available frames; using all",
+                        f"mfbd: top_n={top_n} exceeds the {total} available frames; using all",
                         level="warning",
                     )
                     top_n = total
-                order = np.argsort(frame_scores)[::-1][:top_n]
+                order = np.argsort(scores)[::-1][:top_n]
                 selected = sorted(int(i) for i in order)
-            self.emitter.log(f"deconv: torchmfbd on {len(selected)} frame(s): {selected}")
+            self.emitter.log(f"mfbd: torchmfbd on {len(selected)} frame(s): {selected}")
 
             frames = torch.cat([obs.read_cooked(i)[0] for i in selected], dim=0)
 
             def on_progress(current: int, iter_total: int, loss: float | None) -> None:
                 message = "torchmfbd" if loss is None else f"torchmfbd loss {loss:.6f}"
                 self.emitter.progress(
-                    "deconv", current, iter_total or cfg.iterations, message=message
+                    "mfbd", current, iter_total or cfg.iterations, message=message
                 )
 
             try:
@@ -536,13 +667,14 @@ class Pipeline:
                     log=lambda message, level="info": self.emitter.log(message, level=level),
                 )
             except ValueError as e:
-                raise PipelineError(str(e), stage="deconv")
+                raise PipelineError(str(e), stage="mfbd")
 
-            rel = "stages/deconv/loss_history.npy"
+            rel = "stages/mfbd/loss_history.npy"
             (self.run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
             np.save(self.run_dir / rel, result.loss_history)
-            self.artifact("deconv", "loss_history", "array", rel)
+            self.artifact("mfbd", "loss_history", "array", rel)
 
-            self.preview("deconv", "psf_examples", psf_examples_image(result.psfs))
+            self.preview("mfbd", "psf_examples", psf_examples_image(result.psfs))
+            self._publish_product("mfbd", "mfbd", result.object_nchw)
 
         return result.object_nchw

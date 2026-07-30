@@ -98,7 +98,8 @@ export function initResults(root) {
       byStage.get(a.stage).push(a);
     }
     // keep contract stage order, then anything unknown at the end
-    const order = ['lights', 'darks', 'align', 'lucky', 'deconv', 'output'];
+    const order = ['lights', 'darks', 'align', 'lucky_scoring', 'local_lucky',
+                   'lucky_stack', 'mfbd', 'output'];
     const rank = (s) => { const i = order.indexOf(s); return i < 0 ? order.length : i; };
     const stages = [...byStage.keys()].sort((a, b) => rank(a) - rank(b));
 

@@ -9,9 +9,9 @@ export default async function run(browser) {
 
   // ---- successful demo run ----
   await page.click('#run-demo-ok');
-  // catch the lucky stage mid-flight (progress events land ~35ms apart)
+  // catch the local_lucky stage mid-flight (progress events land ~35ms apart)
   await page.waitForFunction(() => {
-    const bar = document.querySelector('.stage-row[data-stage=lucky] .pbar > div');
+    const bar = document.querySelector('.stage-row[data-stage=local_lucky] .pbar > div');
     if (!bar) return false;
     const w = parseFloat(bar.style.width) || 0;
     return w > 0 && w < 100;
@@ -26,14 +26,14 @@ export default async function run(browser) {
   await shoot(page, '04-run-mid.png');
 
   // artifacts appear live before the run is over
-  await page.waitForSelector('.stage-row[data-stage=lucky] .artifact-thumb img');
+  await page.waitForSelector('.stage-row[data-stage=local_lucky] .artifact-thumb img');
 
-  // deconv stage: latest per-iteration loss message shows inline on the row
+  // mfbd stage: latest per-iteration loss message shows inline on the row
   await page.waitForFunction(() => {
-    const d = document.querySelector('.stage-row[data-stage=deconv] .stage-detail');
+    const d = document.querySelector('.stage-row[data-stage=mfbd] .stage-detail');
     return d && /torchmfbd loss \d/.test(d.textContent);
   }, null, { timeout: 30000 });
-  await shoot(page, '12-deconv-mock-run.png');
+  await shoot(page, '12-mfbd-mock-run.png');
 
   // done
   await page.waitForSelector('.done-banner', { timeout: 30000 });
@@ -70,7 +70,7 @@ export default async function run(browser) {
   assert.equal(await page.locator('#run-status').textContent(), 'Failed');
   assert.match(await page.locator('.error-banner').textContent(), /CUDA out of memory/);
   assert.match(await page.locator('.error-banner').textContent(), /Traceback/);
-  assert.ok(await page.locator('.stage-row[data-stage=lucky] .badge.error').isVisible());
+  assert.ok(await page.locator('.stage-row[data-stage=local_lucky] .badge.error').isVisible());
   await shoot(page, '06-run-error.png');
 
   checkNoPageErrors(page);

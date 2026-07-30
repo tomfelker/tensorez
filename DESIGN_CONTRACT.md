@@ -14,7 +14,15 @@ The three interfaces below are the entire boundary. Changes to any of them bump
 The pipeline is **fixed and opinionated**: stages run in a hard-coded order; the
 recipe only parameterizes them and toggles optional ones. It is not a DAG language.
 
-Stage order: `lights` → `darks` (calibration) → `align` → `lucky` → `deconv` (optional) → `output`.
+Stage order: `lights` → `darks` (calibration) → `align` → `lucky_scoring` →
+`local_lucky` → `lucky_stack` → `mfbd` → `output`.
+
+After alignment there are three independent, individually optional **producers**,
+each yielding one or more single-image products: `local_lucky` (per-pixel lucky
+stacking), `lucky_stack` (classic whole-frame lucky stacks), and `mfbd`
+(multi-frame blind deconvolution). At least one must be enabled. `lucky_scoring`
+computes one cached scalar score per frame and is required by `lucky_stack` and
+by `mfbd` with `frames = "lucky_top"`.
 
 ```toml
 [recipe]
@@ -48,22 +56,34 @@ crop_offsets = [0, 0]        # [x, y] from image center, default [0, 0]
 # (global content-align and local/flow align are planned stages, not in v0;
 #  when they land they appear here as `content = true`, `local = true` + kwargs)
 
-[lucky]
+[lucky_scoring]              # optional; scalar luckiness per frame, cached like alignment
+metric = "fourier_bandpass"  # mean |FFT| in the band below | "image_squared"
+                             # (Muller & Buffington 1974 sharpness, no parameters)
+min_wavelength_pixels = 5.0  # fourier_bandpass band edges (fine detail vs noise floor)
+max_wavelength_pixels = 50.0
+
+[lucky_stack]                # optional; classic lucky stacks. Requires [lucky_scoring].
+top_fractions = [0.1]        # one product per fraction f: the plain average of the
+                             # best ceil(f * N) frames (min 1); 1.0 = mean of everything.
+                             # Products: stages/lucky_stack/lucky_stack_p10.{tif,png} etc.
+                             # (label = percent, '.'->'_' : 0.05->p5, 0.125->p12_5)
+
+[local_lucky]                # optional; per-pixel lucky stacking (best for extended scenes)
 algorithm = "frequency_bands"          # only algorithm in v0
 noise_wavelength_pixels = 2.0          # below this wavelength: treated as noise
 crossover_wavelength_pixels = 35.0     # known/interesting frequency split
 isoplanatic_patch_pixels = 55.0        # spatial smoothing scale of luckiness
 channel_crosstalk = 0.0                # 0 = per-channel luck, 1 = min across channels
+stdevs_above_mean = 2.5                # sigmoid gate center, in σ of per-pixel luck
+steepness = 3.0                        # sigmoid gate sharpness
+# Product: stages/local_lucky/local_lucky.{tif,png}
 
-selection = "sigmoid"                  # "sigmoid" (v0) | "top_k" (planned)
-stdevs_above_mean = 2.5                # sigmoid: gate center, in σ of per-pixel luck
-steepness = 3.0                        # sigmoid: gate sharpness
-# top_fraction = 0.05                  # top_k variant, when implemented
-
-[deconv]                     # optional; multi-frame blind deconvolution (torchmfbd)
+[mfbd]                       # optional; multi-frame blind deconvolution (torchmfbd)
 method = "torchmfbd"         # only value in v0
-frames = "lucky_top"         # "lucky_top" (top_n frames by luckiness score) | "all"
-top_n = 12
+frames = "lucky_top"         # "lucky_top" (needs [lucky_scoring]) | "all"
+top_n = 12                   # count of luckiest frames…
+# top_fraction = 0.1         # …or a fraction of all frames — never both
+# Product: stages/mfbd/mfbd.{tif,png}
 diameter_cm = 27.94          # default: Celestron C11 aperture
 central_obscuration_cm = 9.5 # default: Celestron C11
 # Pixel scale — EXACTLY ONE representation per recipe file (hard error if both/neither):
@@ -80,8 +100,10 @@ lr_obj = 0.02
 lr_modes = 0.08
 apodization_border = 0       # keep 0 for planets on dark sky
 frequency_cutoff = [0.2, 0.3]  # reconstruction filter, fractions of the diffraction limit
-# Requires a square [align] crop. With [deconv] present, final.* is the deconvolution
-# and the lucky stack is published as stages/lucky/lucky_stack.{tif,png}.
+# Requires a square [align] crop.
+# final.* is the fanciest enabled product: mfbd, else local_lucky, else the
+# FIRST-listed lucky_stack fraction; every product also stays available under
+# its stages/<stage>/ artifacts.
 
 [output]
 dir = "output"               # runs land in <dir>/<name>/<UTC timestamp>/
@@ -154,8 +176,8 @@ restartable; completed stages are served from cache on rerun.
   "run": {"started_utc": "...", "seconds": 123.4, "frame_count": 300},
   "stages": [{"name": "align", "cached": false, "seconds": 5.2}, ...],
   "artifacts": [
-    {"stage": "lucky", "name": "luckiness_mean", "kind": "preview",
-     "path": "stages/lucky/luckiness_mean.png", "width": 512, "height": 512},
+    {"stage": "local_lucky", "name": "luckiness_mean", "kind": "preview",
+     "path": "stages/local_lucky/luckiness_mean.png", "width": 512, "height": 512},
     ...
   ]
 }
@@ -176,11 +198,13 @@ tensorez dev branch, with file identity added to the key.
 
 ## Amendments (v0, post-integration)
 
-- `stage_start` for `lucky` carries `pass1_cached: bool` — the lucky stage is never
+- `stage_start` for `local_lucky` carries `pass1_cached: bool` — that stage is never
   fully `cached` (pass 2 always runs), but pass-1 statistics may be served from cache.
   Consumers must ignore unknown fields on any event (confirmed both sides).
 - `tensorez validate` emits one `validate_result` event:
-  `{recipe, frame_count, stages: [{stage, cached}]}` over stages `darks`, `align`, `lucky_stats`.
+  `{recipe, frame_count, stages: [{stage, cached}]}` over the cacheable stages —
+  `darks`, `align`, `lucky_scoring`, `local_lucky_stats` — each present only when
+  the corresponding recipe section is enabled.
 - `done.final` is a path **relative to `run_dir`** (e.g. `"final.tif"`); its preview
   is `final_preview.png` by convention.
 - `final.npy` on disk is **HWC** float32 (NCHW applies to in-memory torch tensors only).
@@ -188,21 +212,26 @@ tensorez dev branch, with file identity added to the key.
   `(name, kind, frame)` is unique.
 - TOML integer literals are accepted anywhere a float is expected (JS serializers
   write `2.0` as `2`).
-- The lucky stage always emits `stages/lucky/frame_scores.npy` (per-frame
-  spatial-mean luckiness, cached with pass-1 stats) and a `log` line naming the
-  best frames. The `deconv` stage is never `cached: true` (its output is the
-  product); its per-iteration `progress` carries the current loss in `message`,
-  and it emits `loss_history` (array) and `psf_examples` (preview) artifacts.
+- The `lucky_scoring` stage emits `stages/lucky_scoring/frame_scores.npy` and a
+  `log` line naming the best frames; the scores themselves are cached. The `mfbd`
+  stage is never `cached: true` (its output is a product); its per-iteration
+  `progress` carries the current loss in `message`, and it emits `loss_history`
+  (array) and `psf_examples` (preview) artifacts.
 - Recipe *files* carry exactly one pixel-scale representation; the *resolved*
   recipe in `run_start`/`validate_result`/manifest carries the camera keys (when
   used) plus the computed effective `pixel_scale_arcsec`.
 - `[lights] debayer` replaced the Bayer-phase machinery: `[align]
   only_even_shifts` is GONE (unknown-key error if present) and Bayer lights no
   longer require it — debayering happens on read, so alignment and cropping are
-  mosaic-agnostic. With `debayer = "bilinear"`, the lucky stage still weights
-  each pixel by the per-channel Bayer sample mask, now shifted per frame along
-  with the image. With `"superpixel_rggb"`, `[deconv] wavelengths_nm` needs 4
+  mosaic-agnostic. With `debayer = "bilinear"`, the local_lucky stage still
+  weights each pixel by the per-channel Bayer sample mask, now shifted per frame
+  along with the image. With `"superpixel_rggb"`, `[mfbd] wavelengths_nm` needs 4
   entries (R, G1, G2, B).
+- The old `[lucky]` and `[deconv]` sections were split/renamed into
+  `[lucky_scoring]` / `[lucky_stack]` / `[local_lucky]` / `[mfbd]` (all
+  optional, at least one producer required); old names are unknown-section
+  hard errors. `[lucky]`'s `selection` key is gone — classic top-K selection
+  is now the `lucky_stack` stage.
 
 ## 4. Pixel conventions
 

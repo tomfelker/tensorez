@@ -9,7 +9,7 @@ const TESTS = [
   ['results', () => import('./results.test.mjs')],
   ['ser', () => import('./ser.test.mjs')],
   ['real', () => import('./real.test.mjs')],
-  ['deconv', () => import('./deconv.test.mjs')],
+  ['mfbd', () => import('./mfbd.test.mjs')],
 ];
 
 const filter = process.argv[2];

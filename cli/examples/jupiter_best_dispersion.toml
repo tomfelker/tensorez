@@ -16,13 +16,18 @@ center_of_mass = true
 per_channel = true
 crop = [400, 400]
 
-[lucky]
+[lucky_scoring]
+metric = "fourier_bandpass"
+min_wavelength_pixels = 5.0
+max_wavelength_pixels = 50.0
+
+[local_lucky]
 crossover_wavelength_pixels = 45.0
 isoplanatic_patch_pixels = 70.0
 stdevs_above_mean = 2.0
 steepness = 3.0
 
-[deconv]
+[mfbd]
 frames = "lucky_top"
 top_n = 8
 iterations = 100

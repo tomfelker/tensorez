@@ -46,7 +46,7 @@ name = "darks"
 paths = ["{lights_path.as_posix()}"]
 [darks]
 paths = ["{darks_path.as_posix()}"]
-[lucky]
+[local_lucky]
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 6.0
 isoplanatic_patch_pixels = 10.0
@@ -59,7 +59,7 @@ debug_frames = 0
     assert proc.returncode == 0, proc.stdout + proc.stderr
     first = CliRun(proc, parse_events(proc.stdout), 0.0)
     stages = [e["stage"] for e in first.events_of("stage_start")]
-    assert stages == ["lights", "darks", "align", "lucky", "output"]
+    assert stages == ["lights", "darks", "align", "local_lucky", "output"]
     darks_start = [e for e in first.events_of("stage_start") if e["stage"] == "darks"][0]
     assert darks_start["cached"] is False
 

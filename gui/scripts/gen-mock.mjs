@@ -149,45 +149,57 @@ const ARTIFACTS = [
   { stage: 'align', name: 'aligned_first_frame', kind: 'preview',
     path: 'stages/align/aligned_first_frame.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 0.5 })) },
-  { stage: 'lucky', name: 'weights_pass1', kind: 'preview',
-    path: 'stages/lucky/weights_pass1.png', width: 256, height: 256,
+  { stage: 'lucky_scoring', name: 'frame_scores', kind: 'array',
+    path: 'stages/lucky_scoring/frame_scores.npy',
+    gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
+  { stage: 'local_lucky', name: 'weights_pass1', kind: 'preview',
+    path: 'stages/local_lucky/weights_pass1.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => noiseMap(x, y, n, { tint: [0.8, 0.75, 1.0] })) },
-  { stage: 'lucky', name: 'frame_0000', kind: 'sequence_frame', frame: 0,
-    path: 'stages/lucky/frames/frame_0000.png', width: 128, height: 128,
+  { stage: 'local_lucky', name: 'frame_0000', kind: 'sequence_frame', frame: 0,
+    path: 'stages/local_lucky/frames/frame_0000.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x + 3, y - 2, n, { sharp: 0.45 })) },
-  { stage: 'lucky', name: 'frame_0001', kind: 'sequence_frame', frame: 1,
-    path: 'stages/lucky/frames/frame_0001.png', width: 128, height: 128,
+  { stage: 'local_lucky', name: 'frame_0001', kind: 'sequence_frame', frame: 1,
+    path: 'stages/local_lucky/frames/frame_0001.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x - 2, y + 1, n, { sharp: 0.55 })) },
-  { stage: 'lucky', name: 'frame_0002', kind: 'sequence_frame', frame: 2,
-    path: 'stages/lucky/frames/frame_0002.png', width: 128, height: 128,
+  { stage: 'local_lucky', name: 'frame_0002', kind: 'sequence_frame', frame: 2,
+    path: 'stages/local_lucky/frames/frame_0002.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x, y + 3, n, { sharp: 0.4 })) },
-  { stage: 'lucky', name: 'frame_0003', kind: 'sequence_frame', frame: 3,
-    path: 'stages/lucky/frames/frame_0003.png', width: 128, height: 128,
+  { stage: 'local_lucky', name: 'frame_0003', kind: 'sequence_frame', frame: 3,
+    path: 'stages/local_lucky/frames/frame_0003.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x - 1, y, n, { sharp: 0.6 })) },
-  { stage: 'lucky', name: 'luckiness_mean', kind: 'preview',
-    path: 'stages/lucky/luckiness_mean.png', width: 256, height: 256,
+  { stage: 'local_lucky', name: 'luckiness_mean', kind: 'preview',
+    path: 'stages/local_lucky/luckiness_mean.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => noiseMap(x, y, n, { scale: 7, tint: [1, 0.9, 0.7] })) },
-  { stage: 'lucky', name: 'unweighted_average', kind: 'preview',
-    path: 'stages/lucky/unweighted_average.png', width: 256, height: 256,
+  { stage: 'local_lucky', name: 'unweighted_average', kind: 'preview',
+    path: 'stages/local_lucky/unweighted_average.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 0.35 })) },
-  { stage: 'lucky', name: 'luckiness', kind: 'array',
-    path: 'stages/lucky/luckiness.npy',
+  { stage: 'local_lucky', name: 'luckiness', kind: 'array',
+    path: 'stages/local_lucky/luckiness.npy',
     gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
-  { stage: 'lucky', name: 'frame_scores', kind: 'array',
-    path: 'stages/lucky/frame_scores.npy',
-    gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
-  { stage: 'lucky', name: 'lucky_stack', kind: 'image',
-    path: 'stages/lucky/lucky_stack.tif',
+  { stage: 'local_lucky', name: 'local_lucky', kind: 'image',
+    path: 'stages/local_lucky/local_lucky.tif',
     gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
-  { stage: 'lucky', name: 'lucky_stack', kind: 'preview',
-    path: 'stages/lucky/lucky_stack.png', width: 256, height: 256,
+  { stage: 'local_lucky', name: 'local_lucky', kind: 'preview',
+    path: 'stages/local_lucky/local_lucky.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 1.1 })) },
-  { stage: 'deconv', name: 'psf_examples', kind: 'preview',
-    path: 'stages/deconv/psf_examples.png', width: 256, height: 256,
+  { stage: 'lucky_stack', name: 'lucky_stack_p10', kind: 'image',
+    path: 'stages/lucky_stack/lucky_stack_p10.tif',
+    gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
+  { stage: 'lucky_stack', name: 'lucky_stack_p10', kind: 'preview',
+    path: 'stages/lucky_stack/lucky_stack_p10.png', width: 256, height: 256,
+    gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 0.9 })) },
+  { stage: 'mfbd', name: 'psf_examples', kind: 'preview',
+    path: 'stages/mfbd/psf_examples.png', width: 256, height: 256,
     gen: (s) => makeImage(s, psfGrid) },
-  { stage: 'deconv', name: 'loss_history', kind: 'array',
-    path: 'stages/deconv/loss_history.npy',
+  { stage: 'mfbd', name: 'loss_history', kind: 'array',
+    path: 'stages/mfbd/loss_history.npy',
     gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
+  { stage: 'mfbd', name: 'mfbd', kind: 'image',
+    path: 'stages/mfbd/mfbd.tif',
+    gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
+  { stage: 'mfbd', name: 'mfbd', kind: 'preview',
+    path: 'stages/mfbd/mfbd.png', width: 256, height: 256,
+    gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 1.4 })) },
   { stage: 'output', name: 'final_preview', kind: 'preview',
     path: 'final_preview.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 1.4 })) },
@@ -206,16 +218,18 @@ const RECIPE = {
   darks: { paths: ['data/darks.ser'] },
   align: { center_of_mass: true, crop: [512, 512],
            crop_align: 2, crop_offsets: [0, 0] },
-  lucky: { algorithm: 'frequency_bands', noise_wavelength_pixels: 2.0,
-           crossover_wavelength_pixels: 35.0, isoplanatic_patch_pixels: 55.0,
-           channel_crosstalk: 0.0, selection: 'sigmoid',
-           stdevs_above_mean: 2.5, steepness: 3.0 },
-  deconv: { method: 'torchmfbd', frames: 'lucky_top', top_n: 12,
-            diameter_cm: 20.0, central_obscuration_cm: 0.0,
-            pixel_scale_arcsec: 0.25, wavelengths_nm: [700.0, 530.0, 470.0],
-            psf_model: 'kl', n_modes: 20, iterations: 100, optimizer: 'adam',
-            lr_obj: 0.02, lr_modes: 0.08, apodization_border: 0,
-            frequency_cutoff: [0.2, 0.3] },
+  lucky_scoring: { metric: 'fourier_bandpass', min_wavelength_pixels: 5.0,
+                   max_wavelength_pixels: 50.0 },
+  lucky_stack: { top_fractions: [0.1] },
+  local_lucky: { algorithm: 'frequency_bands', noise_wavelength_pixels: 2.0,
+                 crossover_wavelength_pixels: 35.0, isoplanatic_patch_pixels: 55.0,
+                 channel_crosstalk: 0.0, stdevs_above_mean: 2.5, steepness: 3.0 },
+  mfbd: { method: 'torchmfbd', frames: 'lucky_top', top_n: 12,
+          diameter_cm: 20.0, central_obscuration_cm: 0.0,
+          pixel_scale_arcsec: 0.25, wavelengths_nm: [700.0, 530.0, 470.0],
+          psf_model: 'kl', n_modes: 20, iterations: 100, optimizer: 'adam',
+          lr_obj: 0.02, lr_modes: 0.08, apodization_border: 0,
+          frequency_cutoff: [0.2, 0.3] },
   output: { dir: 'output', debug_frames: 10 },
 };
 
@@ -239,17 +253,24 @@ crop = [512, 512]
 crop_align = 2
 crop_offsets = [0, 0]
 
-[lucky]
+[lucky_scoring]
+metric = "fourier_bandpass"
+min_wavelength_pixels = 5.0
+max_wavelength_pixels = 50.0
+
+[lucky_stack]
+top_fractions = [0.1]
+
+[local_lucky]
 algorithm = "frequency_bands"
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 35.0
 isoplanatic_patch_pixels = 55.0
 channel_crosstalk = 0.0
-selection = "sigmoid"
 stdevs_above_mean = 2.5
 steepness = 3.0
 
-[deconv]
+[mfbd]
 method = "torchmfbd"
 frames = "lucky_top"
 top_n = 12
@@ -306,46 +327,62 @@ function buildEvents({ fail = false } = {}) {
   ARTIFACTS.filter((a) => a.stage === 'align').forEach(art);
   push({ event: 'stage_end', stage: 'align', seconds: 5.2 });
 
-  push({ event: 'stage_start', stage: 'lucky', cached: false });
-  progress('lucky', 300, 'pass 1/2 — measuring luckiness', 10);
+  push({ event: 'stage_start', stage: 'lucky_scoring', cached: false });
+  progress('lucky_scoring', 300, 'scoring frames (fourier_bandpass)', 8);
+  art(ARTIFACTS.find((a) => a.name === 'frame_scores'));
+  push({ event: 'log', level: 'info',
+         message: 'lucky_scoring: best frames: 81 (0.3129), 85 (0.3120), 28 (0.3117), …' });
+  push({ event: 'stage_end', stage: 'lucky_scoring', seconds: 6.3 });
+
+  push({ event: 'stage_start', stage: 'local_lucky', cached: false, pass1_cached: false });
+  progress('local_lucky', 300, 'pass 1/2 — measuring luckiness', 10);
   art(ARTIFACTS.find((a) => a.name === 'weights_pass1'));
   if (fail) {
     push({ event: 'log', level: 'warning',
            message: 'GPU memory low: 214 MiB free before pass 2' });
-    push({ event: 'error', stage: 'lucky',
+    push({ event: 'error', stage: 'local_lucky',
            message: 'CUDA out of memory: tried to allocate 2.50 GiB (GPU 0; 3.94 GiB total)',
            traceback:
              'Traceback (most recent call last):\n' +
-             '  File "tensorez/lucky.py", line 214, in weighted_accumulate\n' +
+             '  File "tensorez/pipeline.py", line 214, in weighted_accumulate\n' +
              '    acc = acc + weights[:, None] * bands\n' +
              'torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.50 GiB' });
     return ev;
   }
   ARTIFACTS.filter((a) => a.kind === 'sequence_frame').forEach(art);
-  progress('lucky', 300, 'pass 2/2 — weighted accumulation', 10);
+  progress('local_lucky', 300, 'pass 2/2 — weighted accumulation', 10);
   art(ARTIFACTS.find((a) => a.name === 'luckiness_mean'));
   art(ARTIFACTS.find((a) => a.name === 'unweighted_average'));
   art(ARTIFACTS.find((a) => a.name === 'luckiness'));
-  art(ARTIFACTS.find((a) => a.name === 'frame_scores'));
   push({ event: 'log', level: 'info',
-         message: 'lucky: best frames by mean luckiness: 81 (0.3129), 85 (0.3120), 28 (0.3117), …' });
-  art(ARTIFACTS.find((a) => a.path === 'stages/lucky/lucky_stack.tif'));
-  art(ARTIFACTS.find((a) => a.path === 'stages/lucky/lucky_stack.png'));
-  push({ event: 'stage_end', stage: 'lucky', seconds: 41.7 });
+         message: 'local_lucky: average effective frames per pixel: 41.55 of 300' });
+  art(ARTIFACTS.find((a) => a.path === 'stages/local_lucky/local_lucky.tif'));
+  art(ARTIFACTS.find((a) => a.path === 'stages/local_lucky/local_lucky.png'));
+  push({ event: 'stage_end', stage: 'local_lucky', seconds: 41.7 });
 
-  // deconv stage: per-iteration progress with the loss in `message`
-  push({ event: 'stage_start', stage: 'deconv', cached: false });
+  push({ event: 'stage_start', stage: 'lucky_stack', cached: false });
+  progress('lucky_stack', 30, 'stacking luckiest frames', 6);
   push({ event: 'log', level: 'info',
-         message: 'deconv: torchmfbd on 12 frame(s): [28, 29, 31, 81, 82, 85, 86, 87, 88, 91, 92, 95]' });
+         message: 'lucky_stack: lucky_stack_p10 = best 30 of 300 frame(s)' });
+  art(ARTIFACTS.find((a) => a.path === 'stages/lucky_stack/lucky_stack_p10.tif'));
+  art(ARTIFACTS.find((a) => a.path === 'stages/lucky_stack/lucky_stack_p10.png'));
+  push({ event: 'stage_end', stage: 'lucky_stack', seconds: 3.9 });
+
+  // mfbd stage: per-iteration progress with the loss in `message`
+  push({ event: 'stage_start', stage: 'mfbd', cached: false });
+  push({ event: 'log', level: 'info',
+         message: 'mfbd: torchmfbd on 12 frame(s): [28, 29, 31, 81, 82, 85, 86, 87, 88, 91, 92, 95]' });
   for (let i = 1; i <= 10; i++) {
     const iter = i * 10;
     const loss = (0.97 * Math.exp(-i * 0.18) + 0.18).toFixed(6);
-    push({ event: 'progress', stage: 'deconv', current: iter, total: 100,
+    push({ event: 'progress', stage: 'mfbd', current: iter, total: 100,
            message: `torchmfbd loss ${loss}` });
   }
   art(ARTIFACTS.find((a) => a.name === 'psf_examples'));
   art(ARTIFACTS.find((a) => a.name === 'loss_history'));
-  push({ event: 'stage_end', stage: 'deconv', seconds: 38.4 });
+  art(ARTIFACTS.find((a) => a.path === 'stages/mfbd/mfbd.tif'));
+  art(ARTIFACTS.find((a) => a.path === 'stages/mfbd/mfbd.png'));
+  push({ event: 'stage_end', stage: 'mfbd', seconds: 38.4 });
 
   push({ event: 'stage_start', stage: 'output', cached: false });
   art(ARTIFACTS.find((a) => a.name === 'final_preview'));
@@ -363,8 +400,10 @@ async function main() {
   // fake run dir
   const events = buildEvents();
   await fsp.mkdir(path.join(RUN, 'stages/align'), { recursive: true });
-  await fsp.mkdir(path.join(RUN, 'stages/lucky/frames'), { recursive: true });
-  await fsp.mkdir(path.join(RUN, 'stages/deconv'), { recursive: true });
+  await fsp.mkdir(path.join(RUN, 'stages/lucky_scoring'), { recursive: true });
+  await fsp.mkdir(path.join(RUN, 'stages/local_lucky/frames'), { recursive: true });
+  await fsp.mkdir(path.join(RUN, 'stages/lucky_stack'), { recursive: true });
+  await fsp.mkdir(path.join(RUN, 'stages/mfbd'), { recursive: true });
   for (const a of ARTIFACTS) {
     const data = a.gen(a.width || 256);
     await fsp.writeFile(path.join(RUN, a.path), data);
@@ -381,8 +420,10 @@ async function main() {
       { name: 'lights', cached: false, seconds: 3.1 },
       { name: 'darks', cached: true, seconds: 0.0 },
       { name: 'align', cached: false, seconds: 5.2 },
-      { name: 'lucky', cached: false, seconds: 41.7 },
-      { name: 'deconv', cached: false, seconds: 38.4 },
+      { name: 'lucky_scoring', cached: false, seconds: 6.3 },
+      { name: 'local_lucky', cached: false, seconds: 41.7 },
+      { name: 'lucky_stack', cached: false, seconds: 3.9 },
+      { name: 'mfbd', cached: false, seconds: 38.4 },
       { name: 'output', cached: false, seconds: 0.8 },
     ],
     artifacts: ARTIFACTS.map(({ gen, ...a }) => a),
