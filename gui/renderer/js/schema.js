@@ -42,6 +42,12 @@ export const SCHEMA = [
       { key: 'frame_step', type: 'int', default: 1, min: 1 },
       { key: 'end_frame', type: 'int', optional: true, default: 300, min: 1,
         help: 'exclusive; leave unset to use all frames' },
+      { key: 'debayer', type: 'enum',
+        options: ['bilinear', 'superpixel_rgb', 'superpixel_rggb', 'none'], default: 'bilinear',
+        help: 'Bayer sources only (ignored otherwise). bilinear: full-size, missing colors ' +
+          'interpolated. superpixel_*: half-size, real photosites only (rggb keeps both ' +
+          'greens as 4 channels — [deconv] then needs 4 wavelengths). none: treat the ' +
+          'mosaic as mono (IR-filtered captures)' },
     ],
   },
   {
@@ -59,15 +65,10 @@ export const SCHEMA = [
     label: 'Align',
     help: 'Integer-shift center-of-mass alignment and centered crop.',
     validate: (s) => {
-      // sparse recipes: center_of_mass defaults true, only_even_shifts false
+      // sparse recipes: center_of_mass defaults true
       const problems = [];
-      if (s.per_channel === true) {
-        if (s.center_of_mass === false) {
-          problems.push('align: per_channel requires center_of_mass = true (CLI hard error)');
-        }
-        if (s.only_even_shifts === true) {
-          problems.push('align: per_channel is incompatible with only_even_shifts (CLI hard error)');
-        }
+      if (s.per_channel === true && s.center_of_mass === false) {
+        problems.push('align: per_channel requires center_of_mass = true (CLI hard error)');
       }
       return problems;
     },
@@ -75,11 +76,8 @@ export const SCHEMA = [
       { key: 'center_of_mass', type: 'bool', default: true, help: 'integer-shift CoM centering' },
       { key: 'per_channel', type: 'bool', default: false,
         help: 'align each color channel independently — corrects atmospheric dispersion ' +
-          '(requires center_of_mass; incompatible with only_even_shifts)',
-        conflictIf: (s) => s.center_of_mass === false ? 'requires center_of_mass'
-          : s.only_even_shifts === true ? 'incompatible with only_even_shifts' : null },
-      { key: 'only_even_shifts', type: 'bool', default: false,
-        help: 'preserves Bayer phase; required for Bayer lights' },
+          '(requires center_of_mass)',
+        conflictIf: (s) => s.center_of_mass === false ? 'requires center_of_mass' : null },
       { key: 'crop', type: 'int2', optional: true, default: [512, 512], labels: ['w', 'h'],
         min: 2, help: 'centered after alignment; unset = full frame. [deconv] needs a square crop' },
       { key: 'crop_align', type: 'int', default: 2, min: 1,

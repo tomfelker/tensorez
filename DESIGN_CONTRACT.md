@@ -28,6 +28,11 @@ paths = ["data/jupiter.ser"]
 start_frame = 0              # inclusive, default 0
 frame_step = 1               # default 1
 end_frame = 300              # exclusive; omit for "all frames"
+debayer = "bilinear"         # how Bayer sources become channels (ignored otherwise):
+                             #   "bilinear"        full-size 3-ch, missing colors interpolated
+                             #   "superpixel_rgb"  half-size 3-ch, real photosites, greens averaged
+                             #   "superpixel_rggb" half-size 4-ch (R, G1, G2, B), real photosites
+                             #   "none"            keep the mosaic as 1-ch mono (IR-filtered captures)
 
 [darks]                      # optional section; omit to skip dark calibration
 paths = ["data/darks.ser"]
@@ -36,8 +41,7 @@ paths = ["data/darks.ser"]
 [align]
 center_of_mass = true        # integer-shift CoM centering
 per_channel = false          # align each color channel independently — corrects atmospheric
-                             # dispersion; requires center_of_mass, incompatible with only_even_shifts
-only_even_shifts = false     # true preserves Bayer phase; must be true for Bayer lights
+                             # dispersion; requires center_of_mass
 crop = [512, 512]            # [w, h], centered after alignment; omit for full frame
 crop_align = 2               # crop size/offset rounded to multiple of this
 crop_offsets = [0, 0]        # [x, y] from image center, default [0, 0]
@@ -192,11 +196,22 @@ tensorez dev branch, with file identity added to the key.
 - Recipe *files* carry exactly one pixel-scale representation; the *resolved*
   recipe in `run_start`/`validate_result`/manifest carries the camera keys (when
   used) plus the computed effective `pixel_scale_arcsec`.
+- `[lights] debayer` replaced the Bayer-phase machinery: `[align]
+  only_even_shifts` is GONE (unknown-key error if present) and Bayer lights no
+  longer require it — debayering happens on read, so alignment and cropping are
+  mosaic-agnostic. With `debayer = "bilinear"`, the lucky stage still weights
+  each pixel by the per-channel Bayer sample mask, now shifted per frame along
+  with the image. With `"superpixel_rggb"`, `[deconv] wavelengths_nm` needs 4
+  entries (R, G1, G2, B).
 
 ## 4. Pixel conventions
 
-Float32, linear light, shape `(N, C, H, W)` in torch code. Channel order RGB.
+Float32, linear light, shape `(N, C, H, W)` in torch code. Channel order RGB
+(or R, G1, G2, B for `debayer = "superpixel_rggb"`; mono is 1 channel).
 Display conversion is linear → sRGB (IEC 61966-2-1) at the very end only —
 no auto-stretch, no gamma knobs; WYSIWYG like AstroLock Seeker.
 SER 16-bit values scale to [0, 1] by /(2^bit_depth − 1). Bayer sources are
-demosaiced on read (bilinear) in v0.
+debayered on read per `[lights] debayer`; the superpixel modes halve width
+and height (crop sizes and all *_pixels tunings are in output pixels).
+4-channel results collapse to RGB (greens averaged) in `final.tif` and every
+preview PNG; `final.npy` keeps the exact channels.

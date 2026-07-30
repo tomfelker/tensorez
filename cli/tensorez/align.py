@@ -12,8 +12,8 @@ The center of mass is computed on the above-average part of the brightness
 channels.  Because rolling wraps content around the edges, moving the mass
 changes the centroid slightly, so we iterate to convergence (a few steps).
 
-``only_even_shifts`` restricts shifts to multiples of 2 so a Bayer mosaic's
-2x2 phase is preserved; required for Bayer sources.
+(Bayer mosaics are debayered on read — see bayer.py — so alignment never
+needs to worry about preserving a 2x2 mosaic phase.)
 """
 
 from __future__ import annotations
@@ -41,32 +41,26 @@ def center_of_mass(image_nchw: torch.Tensor) -> tuple[float, float]:
     return com_y, com_x
 
 
-def _quantize_shift(value: float, only_even_shifts: bool) -> int:
-    shift = int(value)  # truncate toward zero, as the reference did
-    if only_even_shifts:
-        shift &= -2
-    return -shift
+def _quantize_shift(value: float) -> int:
+    return -int(value)  # truncate toward zero, as the reference did
 
 
 def compute_com_shift(
     image_nchw: torch.Tensor,
-    only_even_shifts: bool = False,
     max_steps: int = 10,
 ) -> tuple[int, int]:
     """Total (dy, dx) integer roll that centers the image's center of mass.
 
     Iterates because rolling wraps pixels around the border, slightly moving
-    the centroid; converges when the residual shift rounds to zero (or, for
-    even-only shifts, below 2).
+    the centroid; converges when the residual shift rounds to zero.
     """
     total_dy, total_dx = 0, 0
     image = image_nchw
-    threshold = 2 if only_even_shifts else 1
     for _ in range(max_steps):
         com_y, com_x = center_of_mass(image)
-        dy = _quantize_shift(com_y, only_even_shifts)
-        dx = _quantize_shift(com_x, only_even_shifts)
-        if max(abs(dy), abs(dx)) < threshold:
+        dy = _quantize_shift(com_y)
+        dx = _quantize_shift(com_x)
+        if max(abs(dy), abs(dx)) < 1:
             break
         image = torch.roll(image, shifts=(dy, dx), dims=(-2, -1))
         total_dy += dy
@@ -95,7 +89,7 @@ def compute_com_shift_per_channel(
     deconv's per-channel tip/tilt modes absorb the rest).
     """
     return [
-        compute_com_shift(image_nchw[:, c : c + 1], only_even_shifts=False, max_steps=max_steps)
+        compute_com_shift(image_nchw[:, c : c + 1], max_steps=max_steps)
         for c in range(image_nchw.shape[1])
     ]
 
@@ -122,8 +116,7 @@ def crop_rect(
     """(x, y, w, h) of a centered crop, or None for full frame.
 
     ``crop`` is (w, h); ``crop_offsets`` is (x, y) from the image center.
-    The top-left corner is floored to a multiple of ``crop_align`` so a Bayer
-    2x2 phase survives cropping (with the default crop_align of 2).
+    The top-left corner is floored to a multiple of ``crop_align``.
     """
     if crop is None:
         return None

@@ -201,9 +201,10 @@ const ARTIFACTS = [
 
 const RECIPE = {
   recipe: { version: 0, name: 'jupiter_demo' },
-  lights: { paths: ['data/jupiter.ser'], start_frame: 0, frame_step: 1, end_frame: 300 },
+  lights: { paths: ['data/jupiter.ser'], start_frame: 0, frame_step: 1, end_frame: 300,
+            debayer: 'bilinear' },
   darks: { paths: ['data/darks.ser'] },
-  align: { center_of_mass: true, only_even_shifts: false, crop: [512, 512],
+  align: { center_of_mass: true, crop: [512, 512],
            crop_align: 2, crop_offsets: [0, 0] },
   lucky: { algorithm: 'frequency_bands', noise_wavelength_pixels: 2.0,
            crossover_wavelength_pixels: 35.0, isoplanatic_patch_pixels: 55.0,
@@ -227,13 +228,13 @@ paths = ["data/jupiter.ser"]
 start_frame = 0
 frame_step = 1
 end_frame = 300
+debayer = "bilinear"
 
 [darks]
 paths = ["data/darks.ser"]
 
 [align]
 center_of_mass = true
-only_even_shifts = false
 crop = [512, 512]
 crop_align = 2
 crop_offsets = [0, 0]

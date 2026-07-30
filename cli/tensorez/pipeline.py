@@ -130,7 +130,6 @@ class Pipeline:
         a = self.recipe.align
         return AlignParams(
             center_of_mass=a.center_of_mass,
-            only_even_shifts=a.only_even_shifts,
             per_channel=a.per_channel,
             crop=a.crop,
             crop_align=a.crop_align,
@@ -154,21 +153,18 @@ class Pipeline:
                 start_frame=r.lights.start_frame,
                 frame_step=r.lights.frame_step,
                 end_frame=r.lights.end_frame,
+                debayer=r.lights.debayer,
             )
         except (FileNotFoundError, ValueError) as e:
             raise PipelineError(str(e), stage="lights")
         darks = None
         if r.darks is not None:
             try:
-                darks = ImageSequence(list(r.darks.paths))
+                # Darks come from the same sensor, so the same debayer mode
+                # keeps their geometry and channels matching the lights.
+                darks = ImageSequence(list(r.darks.paths), debayer=r.lights.debayer)
             except (FileNotFoundError, ValueError) as e:
                 raise PipelineError(str(e), stage="darks")
-        if lights.is_bayer and not r.align.only_even_shifts:
-            raise PipelineError(
-                "Bayer lights require [align] only_even_shifts = true "
-                "so the 2x2 Bayer phase is preserved by alignment",
-                stage="lights",
-            )
         return lights, darks
 
     # -- validate -----------------------------------------------------------
@@ -220,9 +216,12 @@ class Pipeline:
         )
 
         with self.stage("lights", cached=False):
+            layout = lights_seq.color_id.name
+            if lights_seq.is_bayer:
+                layout += f", debayer {lights_seq.debayer}"
             self.emitter.log(
                 f"lights: {len(lights_seq.files)} file(s), {len(lights_seq)} frame(s), "
-                f"color layout {lights_seq.color_id.name}"
+                f"color layout {layout}"
             )
 
         dark_mean, dark_variance = self._run_darks(darks_seq)
@@ -337,7 +336,7 @@ class Pipeline:
                 if per_channel:
                     shift = compute_com_shift_per_channel(image)
                 elif p.center_of_mass:
-                    shift = compute_com_shift(image, p.only_even_shifts)
+                    shift = compute_com_shift(image)
                 else:
                     shift = (0, 0)
                 shifts.append(shift)
@@ -431,14 +430,16 @@ class Pipeline:
             self.preview("lucky", "luckiness_mean", luck_mean, normalize=True)
             self.preview("lucky", "luckiness_stdev", luck_stdev, normalize=True)
 
-            # Bayer sources: weight each pixel only by channels the sensor
-            # actually sampled there.  Alignment uses even shifts (enforced),
-            # so the mosaic phase is invariant and one mask serves all frames.
-            sample_mask: torch.Tensor | None = None
-            if obs.lights.is_bayer:
+            # Bilinearly-demosaiced Bayer sources: weight each pixel only by
+            # channels the sensor actually sampled there, so interpolated
+            # pixels don't dilute the stack.  The mask lives in sensor
+            # coordinates and rides each frame's shift + crop, exactly like
+            # the dark variance does.  (The superpixel modes have no
+            # interpolated pixels, and "none" is mono — no mask needed.)
+            base_mask: torch.Tensor | None = None
+            if obs.lights.is_bayer and obs.lights.debayer == "bilinear":
                 first = obs.lights.read_frame(0)
-                mask = bayer_mask(obs.lights.color_id, first.shape[-2], first.shape[-1])
-                sample_mask = apply_crop(mask, obs.rect_for(mask))
+                base_mask = bayer_mask(obs.lights.color_id, first.shape[-2], first.shape[-1])
 
             # Pass 2: sigmoid-gated weighted average.
             selection = recipe.lucky
@@ -453,7 +454,10 @@ class Pipeline:
                     torch.zeros_like(luckiness),
                 )
                 weight = torch.sigmoid((z - selection.stdevs_above_mean) * selection.steepness)
-                if sample_mask is not None:
+                if base_mask is not None:
+                    sample_mask = apply_crop(
+                        apply_frame_shift(base_mask, obs.shifts[i]), obs.rect_for(base_mask)
+                    )
                     weight = weight * sample_mask
                 if i < debug_frames:
                     self.preview("lucky", f"weight_{i:08d}", weight, normalize=True, frame=i)

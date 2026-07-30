@@ -97,8 +97,10 @@ paths = ["x.ser"]
     p.write_text(base + "[align]\nper_channel = true\ncenter_of_mass = false\n")
     with pytest.raises(RecipeError, match="per_channel requires center_of_mass"):
         load_recipe(p)
-    p.write_text(base + "[align]\nper_channel = true\nonly_even_shifts = true\n")
-    with pytest.raises(RecipeError, match="demosaic without|disable per_channel"):
+    # only_even_shifts is gone (debayering happens on read now); like any
+    # removed key it must be rejected as unknown, not silently ignored
+    p.write_text(base + "[align]\nonly_even_shifts = true\n")
+    with pytest.raises(RecipeError, match="unknown key 'only_even_shifts'"):
         load_recipe(p)
 
 

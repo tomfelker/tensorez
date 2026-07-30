@@ -26,7 +26,6 @@ from .sequence import ImageSequence
 @dataclass(frozen=True)
 class AlignParams:
     center_of_mass: bool = True
-    only_even_shifts: bool = False
     per_channel: bool = False
     crop: tuple[int, int] | None = None
     crop_align: int = 2
@@ -35,7 +34,6 @@ class AlignParams:
     def identity(self) -> str:
         return (
             f"center_of_mass: {self.center_of_mass}\n"
-            f"only_even_shifts: {self.only_even_shifts}\n"
             f"per_channel: {self.per_channel}\n"
             f"crop: {list(self.crop) if self.crop else None}\n"
             f"crop_align: {self.crop_align}\n"
@@ -78,9 +76,7 @@ class Observation:
         """Center-of-mass shift for one calibrated (pre-crop) frame."""
         if not self.align_params.center_of_mass:
             return (0, 0)
-        return compute_com_shift(
-            self.calibrated(index), only_even_shifts=self.align_params.only_even_shifts
-        )
+        return compute_com_shift(self.calibrated(index))
 
     def rect_for(self, image: torch.Tensor) -> tuple[int, int, int, int] | None:
         if not self._rect_known:

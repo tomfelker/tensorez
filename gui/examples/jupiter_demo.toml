@@ -7,13 +7,13 @@ paths = ["data/jupiter.ser"]
 start_frame = 0
 frame_step = 1
 end_frame = 300
+debayer = "bilinear"
 
 [darks]
 paths = ["data/darks.ser"]
 
 [align]
 center_of_mass = true
-only_even_shifts = false
 crop = [512, 512]
 crop_align = 2
 crop_offsets = [0, 0]

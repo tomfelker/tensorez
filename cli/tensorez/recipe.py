@@ -24,12 +24,24 @@ class RecipeError(ValueError):
     """A problem with the recipe file; message is user-facing."""
 
 
+# How Bayer sources are converted to channels on read (bayer.py has the
+# implementations; the literal is repeated here so recipe parsing stays
+# torch-free — keep them in sync):
+#   bilinear         full-size 3-channel, missing colors interpolated
+#   superpixel_rgb   half-size 3-channel, real photosites only, greens averaged
+#   superpixel_rggb  half-size 4-channel (R, G1, G2, B), real photosites only
+#   none             keep the mosaic as 1-channel mono (IR-filtered captures)
+# Ignored for non-Bayer sources.
+DEBAYER_MODES = ("bilinear", "superpixel_rgb", "superpixel_rggb", "none")
+
+
 @dataclass(frozen=True)
 class LightsConfig:
     paths: tuple[str, ...]
     start_frame: int = 0
     frame_step: int = 1
     end_frame: int | None = None
+    debayer: str = "bilinear"
 
 
 @dataclass(frozen=True)
@@ -40,7 +52,6 @@ class DarksConfig:
 @dataclass(frozen=True)
 class AlignConfig:
     center_of_mass: bool = True
-    only_even_shifts: bool = False
     per_channel: bool = False   # per-channel CoM: atmospheric dispersion correction
     crop: tuple[int, int] | None = None
     crop_align: int = 2
@@ -134,10 +145,10 @@ class Recipe:
                 "paths": list(self.lights.paths),
                 "start_frame": self.lights.start_frame,
                 "frame_step": self.lights.frame_step,
+                "debayer": self.lights.debayer,
             },
             "align": {
                 "center_of_mass": self.align.center_of_mass,
-                "only_even_shifts": self.align.only_even_shifts,
                 "per_channel": self.align.per_channel,
                 "crop_align": self.align.crop_align,
                 "crop_offsets": list(self.align.crop_offsets),
@@ -313,11 +324,17 @@ def load_recipe(path: str | Path) -> Recipe:
     s.check_no_unknown_keys()
 
     s = _Section("lights", data["lights"])
+    debayer = s.get("debayer", str, "bilinear")
+    if debayer not in DEBAYER_MODES:
+        raise RecipeError(
+            f"[lights] debayer: must be one of {', '.join(DEBAYER_MODES)}, got {debayer!r}"
+        )
     lights = LightsConfig(
         paths=_resolve_paths(s.get_str_list("paths", required=True), base),
         start_frame=s.get_int("start_frame", 0, minimum=0),
         frame_step=s.get_int("frame_step", 1, minimum=1),
         end_frame=s.get_int("end_frame", None, minimum=1),
+        debayer=debayer,
     )
     if lights.end_frame is not None and lights.end_frame <= lights.start_frame:
         raise RecipeError("[lights] end_frame: must be greater than start_frame")
@@ -332,7 +349,6 @@ def load_recipe(path: str | Path) -> Recipe:
     s = _Section("align", data.get("align", {}))
     align = AlignConfig(
         center_of_mass=s.get("center_of_mass", bool, True),
-        only_even_shifts=s.get("only_even_shifts", bool, False),
         per_channel=s.get("per_channel", bool, False),
         crop=s.get_int_pair("crop", None, minimum=1),
         crop_align=s.get_int("crop_align", 2, minimum=1),
@@ -340,12 +356,6 @@ def load_recipe(path: str | Path) -> Recipe:
     )
     if align.per_channel and not align.center_of_mass:
         raise RecipeError("[align] per_channel requires center_of_mass = true")
-    if align.per_channel and align.only_even_shifts:
-        raise RecipeError(
-            "[align] per_channel cannot be combined with only_even_shifts: independent "
-            "per-channel shifts cannot preserve the Bayer phase anyway — demosaic without "
-            "the even-shift constraint, or disable per_channel"
-        )
     s.check_no_unknown_keys()
 
     s = _Section("lucky", data.get("lucky", {}))

@@ -73,39 +73,86 @@ def test_bayer_demosaic_flat_field(tmp_path: Path) -> None:
     assert torch.allclose(out_g, flat, atol=1e-6)
 
 
-def test_bayer_ser_read_and_even_shift_enforcement(tmp_path: Path) -> None:
+def test_bayer_debayer_modes(tmp_path: Path) -> None:
     rng = np.random.default_rng(1)
     frames = rng.integers(0, 65536, size=(2, 16, 16, 1), dtype=np.uint16)
     path = tmp_path / "bayer.ser"
     ser.write_ser(path, frames, ser.ColorId.BAYER_RGGB)
+    raw = torch.from_numpy(frames[0, :, :, 0].astype(np.float32) / 65535.0)
 
+    # bilinear (the default): full size; at R photosites R is the raw sample
     image = read_ser_frame(str(path), 0)
     assert image.shape == (1, 3, 16, 16)
-    # at R photosites the R channel is the raw sample
-    assert torch.allclose(
-        image[0, 0, 0::2, 0::2],
-        torch.from_numpy(frames[0, 0::2, 0::2, 0].astype(np.float32) / 65535.0),
-    )
+    assert torch.allclose(image[0, 0, 0::2, 0::2], raw[0::2, 0::2])
 
-    seq = ImageSequence([str(path)])
+    # superpixel_rggb: half size, 4 channels of real photosites (R, G1, G2, B)
+    sp4 = read_ser_frame(str(path), 0, "superpixel_rggb")
+    assert sp4.shape == (1, 4, 8, 8)
+    assert torch.equal(sp4[0, 0], raw[0::2, 0::2])  # R
+    assert torch.equal(sp4[0, 1], raw[0::2, 1::2])  # G1 (red row)
+    assert torch.equal(sp4[0, 2], raw[1::2, 0::2])  # G2 (blue row)
+    assert torch.equal(sp4[0, 3], raw[1::2, 1::2])  # B
+
+    # superpixel_rgb: same but the greens are averaged
+    sp3 = read_ser_frame(str(path), 0, "superpixel_rgb")
+    assert sp3.shape == (1, 3, 8, 8)
+    assert torch.equal(sp3[0, 0], sp4[0, 0])
+    assert torch.allclose(sp3[0, 1], (sp4[0, 1] + sp4[0, 2]) / 2)
+    assert torch.equal(sp3[0, 2], sp4[0, 3])
+
+    # none: the mosaic passes through as mono
+    mono = read_ser_frame(str(path), 0, "none")
+    assert mono.shape == (1, 1, 16, 16)
+    assert torch.equal(mono[0, 0], raw)
+
+    seq = ImageSequence([str(path)], debayer="superpixel_rgb")
     assert seq.is_bayer
+    assert seq.read_frame(0).shape == (1, 3, 8, 8)
+    assert "debayer: superpixel_rgb" in seq.identity()
 
-    # pipeline must refuse Bayer lights without only_even_shifts
-    recipe = tmp_path / "r.toml"
-    recipe.write_text(f"""
+
+def test_bayer_pipeline_end_to_end(tmp_path: Path) -> None:
+    """Bayer lights need no alignment restrictions anymore; every debayer
+    mode runs the whole pipeline and yields the expected geometry."""
+    rng = np.random.default_rng(2)
+    h = w = 32
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    frames = []
+    for i in range(6):  # a wandering blob so alignment has something to do
+        blob = np.exp(-((yy - h / 2 - i % 3) ** 2 + (xx - w / 2 + i % 2) ** 2) / 18.0)
+        noisy = np.clip(blob + rng.normal(0, 0.01, (h, w)), 0, 1)
+        frames.append((noisy * 65535).astype(np.uint16)[..., None])
+    path = tmp_path / "bayer.ser"
+    ser.write_ser(path, np.stack(frames), ser.ColorId.BAYER_GRBG)
+
+    expected = {  # (channels, height/width) of final.npy
+        "bilinear": (3, 32),
+        "superpixel_rgb": (3, 16),
+        "superpixel_rggb": (4, 16),
+        "none": (1, 32),
+    }
+    for debayer, (channels, size) in expected.items():
+        recipe = tmp_path / f"r_{debayer}.toml"
+        recipe.write_text(f"""
 [recipe]
 version = 0
-name = "bayer"
+name = "bayer_{debayer}"
 [lights]
 paths = ["{path.as_posix()}"]
+debayer = "{debayer}"
+[lucky]
+crossover_wavelength_pixels = 4.0
+isoplanatic_patch_pixels = 8.0
 [output]
 dir = "{(tmp_path / 'out').as_posix()}"
+debug_frames = 0
 """)
-    proc = run_cli(["run", str(recipe)], cwd=tmp_path)
-    assert proc.returncode != 0
-    events = parse_events(proc.stdout)
-    assert events[-1]["event"] == "error"
-    assert "only_even_shifts" in events[-1]["message"]
+        proc = run_cli(["run", str(recipe)], cwd=tmp_path)
+        assert proc.returncode == 0, f"{debayer}: " + proc.stdout + proc.stderr
+        events = parse_events(proc.stdout)
+        assert events[-1]["event"] == "done"
+        final = np.load(Path(events[0]["run_dir"]) / "final.npy")
+        assert final.shape == (size, size, channels), debayer
 
 
 def test_frame_selection(tmp_path: Path) -> None:

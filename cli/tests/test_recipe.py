@@ -28,6 +28,7 @@ def _load(tmp_path: Path, text: str):
 def test_minimal_recipe_defaults(tmp_path: Path) -> None:
     r = _load(tmp_path, MINIMAL)
     assert r.name == "t"
+    assert r.lights.debayer == "bilinear"
     assert r.align.center_of_mass is True
     assert r.align.crop is None
     assert r.lucky.crossover_wavelength_pixels == 35.0
@@ -55,6 +56,8 @@ def test_wrong_types_are_errors(tmp_path: Path) -> None:
         _load(tmp_path, MINIMAL + "\n[lucky]\nsteepness = \"sharp\"\n")
     with pytest.raises(RecipeError, match="only version 0"):
         _load(tmp_path, MINIMAL.replace("version = 0", "version = 1"))
+    with pytest.raises(RecipeError, match=r"\[lights\] debayer"):
+        _load(tmp_path, MINIMAL.replace('paths = ', 'debayer = "vng"\npaths = '))
     with pytest.raises(RecipeError, match="must match"):
         _load(tmp_path, MINIMAL.replace('name = "t"', 'name = "bad name!"'))
 

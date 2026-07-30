@@ -40,9 +40,9 @@ export default async function run(browser) {
   await page.locator('[data-field="lights.end_frame"] .stepper input').press('Tab');
   assert.match(await toml.inputValue(), /end_frame = 250/);
 
-  // checkbox field
-  await page.check('[data-field="align.only_even_shifts"] input[type=checkbox]');
-  assert.match(await toml.inputValue(), /only_even_shifts = true/);
+  // enum field: debayer dropdown
+  await page.locator('[data-field="lights.debayer"] select').selectOption('superpixel_rgb');
+  assert.match(await toml.inputValue(), /debayer = "superpixel_rgb"/);
 
   // paths list: add a second path
   await page.locator('[data-field="lights.paths"] .paths-list button:has-text("add path")').click();
@@ -122,7 +122,6 @@ export default async function run(browser) {
   // ---- align.per_channel + constraint hints ----
   const pcRow = page.locator('[data-field="align.per_channel"]');
   const pcBox = pcRow.locator('input[type=checkbox]');
-  const oesBox = page.locator('[data-field="align.only_even_shifts"] input[type=checkbox]');
   const comBox = page.locator('[data-field="align.center_of_mass"] input[type=checkbox]');
   const errBox = page.locator('#rc-toml-error');
 
@@ -139,19 +138,14 @@ export default async function run(browser) {
   assert.ok(rt2, 'per_channel must round-trip form <-> TOML');
 
   // conflicting combo from the form: warning note + validation problem
-  await oesBox.check();
+  // (warned while per_channel is on, disabled once it's off)
+  await comBox.uncheck();
   assert.ok(await pcRow.locator('.field-warn').isVisible(), 'conflict warning shown');
-  assert.match(await errBox.textContent(), /incompatible with only_even_shifts/);
+  assert.match(await errBox.textContent(), /requires center_of_mass/);
   await page.locator('[data-section="align"]').scrollIntoViewIfNeeded();
   await shoot(page, '13-recipe-per-channel-conflict.png');
-  await oesBox.uncheck();
-  assert.ok(!(await errBox.isVisible()), 'validation clears when combo is fixed');
-
-  // center_of_mass off: warned while on, disabled once off
-  await comBox.uncheck();
-  assert.match(await errBox.textContent(), /requires center_of_mass/);
   await pcBox.uncheck();
-  assert.ok(!(await errBox.isVisible()));
+  assert.ok(!(await errBox.isVisible()), 'validation clears when combo is fixed');
   assert.ok(await pcBox.isDisabled(), 'cannot enable per_channel without center_of_mass');
   await comBox.check();
   assert.ok(await pcBox.isEnabled(), 're-enabled with center_of_mass');
@@ -160,11 +154,11 @@ export default async function run(browser) {
   // invalid recipe (same class as unknown keys — the CLI refuses it)
   const conflictToml = (await toml.inputValue())
     .replace('per_channel = false', 'per_channel = true')
-    .replace('only_even_shifts = false', 'only_even_shifts = true');
+    .replace('center_of_mass = true', 'center_of_mass = false');
   await toml.fill(conflictToml);
   await page.waitForTimeout(500);
   assert.match(await errBox.textContent(), /form not updated/);
-  assert.match(await errBox.textContent(), /incompatible with only_even_shifts/);
+  assert.match(await errBox.textContent(), /requires center_of_mass/);
 
   // reset for the align-card screenshot refresh
   await page.click('#rc-new');

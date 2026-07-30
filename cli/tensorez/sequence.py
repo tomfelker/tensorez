@@ -9,8 +9,9 @@ Terminology kept from the reference implementation:
 
 Frames are returned as float32 linear-light torch tensors of shape
 (1, C, H, W).  8-bit stills are assumed sRGB-encoded and are linearized;
-16-bit sources are assumed linear.  Bayer SER files are bilinearly
-demosaiced on read.
+16-bit sources are assumed linear.  Bayer SER files are debayered on read
+according to the sequence's ``debayer`` mode (see bayer.py); the mode is
+ignored for non-Bayer sources.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import torch
 from PIL import Image
 
 from . import ser
-from .bayer import demosaic, is_supported_bayer
+from .bayer import DEBAYER_MODES, demosaic, is_supported_bayer, superpixel_rgb, superpixel_rggb
 from .color import srgb_to_linear
 
 STILL_EXTENSIONS = {".png", ".tif", ".tiff", ".jpg", ".jpeg"}
@@ -62,8 +63,8 @@ def read_still(path: str | Path) -> torch.Tensor:
     return t.permute(2, 0, 1).unsqueeze(0).contiguous()
 
 
-def read_ser_frame(path: str, frame_index: int) -> torch.Tensor:
-    """Read one SER frame as float32 linear light, (1, C, H, W); demosaic Bayer."""
+def read_ser_frame(path: str, frame_index: int, debayer: str = "bilinear") -> torch.Tensor:
+    """Read one SER frame as float32 linear light, (1, C, H, W); debayer Bayer."""
     frame_hwc, header = ser.read_frame(path, frame_index)
     color_id = header.color_id
     t = torch.from_numpy(np.ascontiguousarray(frame_hwc)).permute(2, 0, 1).unsqueeze(0)
@@ -73,7 +74,15 @@ def read_ser_frame(path: str, frame_index: int) -> torch.Tensor:
     if color_id == ser.ColorId.RGB:
         return t
     if is_supported_bayer(color_id):
-        return demosaic(t, color_id)
+        if debayer == "bilinear":
+            return demosaic(t, color_id)
+        if debayer == "superpixel_rgb":
+            return superpixel_rgb(t, color_id)
+        if debayer == "superpixel_rggb":
+            return superpixel_rggb(t, color_id)
+        if debayer == "none":
+            return t  # keep the mosaic as mono
+        raise ValueError(f"unknown debayer mode {debayer!r} (expected one of {DEBAYER_MODES})")
     raise ValueError(f"{path}: unsupported SER color_id {color_id}")
 
 
@@ -86,7 +95,11 @@ class ImageSequence:
         start_frame: int = 0,
         frame_step: int = 1,
         end_frame: int | None = None,
+        debayer: str = "bilinear",
     ):
+        if debayer not in DEBAYER_MODES:
+            raise ValueError(f"unknown debayer mode {debayer!r} (expected one of {DEBAYER_MODES})")
+        self.debayer = debayer
         self.start_raw_frame = start_frame
         self.raw_frame_step = frame_step
 
@@ -156,6 +169,7 @@ class ImageSequence:
         lines.append(f"  start_raw_frame: {self.start_raw_frame}")
         lines.append(f"  raw_frame_step: {self.raw_frame_step}")
         lines.append(f"  raw_frame_count: {self.raw_frame_count}")
+        lines.append(f"  debayer: {self.debayer}")
         return "\n".join(lines) + "\n"
 
     def _raw_to_file(self, raw_index: int) -> tuple[str, int]:
@@ -173,7 +187,7 @@ class ImageSequence:
         raw_index = self.start_raw_frame + cooked_index * self.raw_frame_step
         filename, frame_index = self._raw_to_file(raw_index)
         if _is_ser(filename):
-            return read_ser_frame(filename, frame_index)
+            return read_ser_frame(filename, frame_index, self.debayer)
         return read_still(filename)
 
     def __len__(self) -> int:
