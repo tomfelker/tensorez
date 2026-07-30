@@ -15,7 +15,7 @@ version = 0
 name = "t"
 
 [lights]
-paths = ["{SYNTHETIC_SER}"]
+paths = ["{SYNTHETIC_SER.as_posix()}"]
 """
 
 
@@ -62,7 +62,7 @@ def test_wrong_types_are_errors(tmp_path: Path) -> None:
 def test_relative_paths_resolve_against_recipe_dir(tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "x.ser").write_bytes(b"")
-    r = _load(tmp_path, MINIMAL.replace(str(SYNTHETIC_SER), "data/x.ser"))
+    r = _load(tmp_path, MINIMAL.replace(SYNTHETIC_SER.as_posix(), "data/x.ser"))
     assert r.lights.paths[0] == str(tmp_path / "data" / "x.ser")
 
 

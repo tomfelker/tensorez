@@ -22,6 +22,7 @@ const MOCK_RUN_URL = '/mockrun/run1';
 function toUrl(p) {
   if (/^\/(mockrun|examples|fs)\//.test(p)) return p;
   if (p.startsWith('/')) return '/fs' + p;
+  if (/^[A-Za-z]:[\\/]/.test(p)) return '/fs/' + p.replaceAll('\\', '/'); // Windows
   return null;
 }
 

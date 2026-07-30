@@ -4,13 +4,13 @@
 //   - results view on the real deconv run dir
 
 import assert from 'node:assert/strict';
-import { gotoApp, newPage, shoot, checkNoPageErrors } from './helper.mjs';
+import { REPO, gotoApp, newPage, shoot, checkNoPageErrors } from './helper.mjs';
 import { latestRun, expectations } from './real.test.mjs';
 
-const DECONV_RECIPE = '/root/tensorez-next/cli/examples/jupiter_deconv.toml';
+const DECONV_RECIPE = `${REPO}/cli/examples/jupiter_deconv.toml`;
 
 export default async function run(browser) {
-  const DECONV_RUN = latestRun('/root/tensorez-next/cli/output/jupiter_deconv');
+  const DECONV_RUN = latestRun(`${REPO}/cli/output/jupiter_deconv`);
   assert.ok(DECONV_RUN, 'no completed jupiter_deconv run found — run the CLI first');
   const exp = expectations(DECONV_RUN);
 

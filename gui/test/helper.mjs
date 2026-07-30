@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 export const GUI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// repo root with forward slashes: safe both as a filesystem path (Windows
+// accepts /) and inside URLs handed to the mock bridge's /fs/ route
+export const REPO = path.resolve(GUI, '..').replaceAll('\\', '/');
 export const SCREENSHOTS = path.join(GUI, 'screenshots');
 export const PORT = 8199;
 export const BASE = `http://localhost:${PORT}`;

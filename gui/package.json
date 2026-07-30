@@ -9,8 +9,10 @@
   },
   "scripts": {
     "start": "electron .",
+    "predev": "node scripts/gen-mock.mjs",
     "dev": "node dev-server.mjs",
     "gen-mock": "node scripts/gen-mock.mjs",
+    "pretest": "node scripts/gen-mock.mjs",
     "test": "node test/run-all.mjs"
   },
   "keywords": [],

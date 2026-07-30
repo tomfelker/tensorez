@@ -47,14 +47,14 @@ def _recipe(tmp_path: Path, ser_path: Path, per_channel: bool) -> Path:
 version = 0
 name = "disp{int(per_channel)}"
 [lights]
-paths = ["{ser_path}"]
+paths = ["{ser_path.as_posix()}"]
 [align]
 per_channel = {str(per_channel).lower()}
 [lucky]
 crossover_wavelength_pixels = 8.0
 isoplanatic_patch_pixels = 16.0
 [output]
-dir = "{tmp_path / 'out'}"
+dir = "{(tmp_path / 'out').as_posix()}"
 debug_frames = 0
 """)
     return p
@@ -112,14 +112,14 @@ def test_per_channel_mono_is_noop(tmp_path: Path) -> None:
 version = 0
 name = "mono"
 [lights]
-paths = ["{ser_path}"]
+paths = ["{ser_path.as_posix()}"]
 [align]
 per_channel = true
 [lucky]
 crossover_wavelength_pixels = 6.0
 isoplanatic_patch_pixels = 10.0
 [output]
-dir = "{tmp_path / 'out'}"
+dir = "{(tmp_path / 'out').as_posix()}"
 debug_frames = 0
 """)
     proc = run_cli(["run", str(recipe)], cwd=tmp_path)

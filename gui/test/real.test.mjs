@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { gotoApp, newPage, shoot, checkNoPageErrors } from './helper.mjs';
+import { REPO, gotoApp, newPage, shoot, checkNoPageErrors } from './helper.mjs';
 
 const IMAGE_KINDS = new Set(['preview', 'sequence_frame']);
 
@@ -15,7 +15,7 @@ const IMAGE_KINDS = new Set(['preview', 'sequence_frame']);
 export function latestRun(base) {
   if (!fs.existsSync(base)) return null;
   const runs = fs.readdirSync(base)
-    .map((d) => path.join(base, d))
+    .map((d) => `${base}/${d}`) // forward slashes: these paths also go into /fs/ URLs
     .filter((d) => fs.existsSync(path.join(d, 'manifest.json')))
     .sort();
   return runs.at(-1) ?? null;
@@ -31,7 +31,7 @@ export function expectations(runDir) {
 }
 
 export default async function run(browser) {
-  const REAL_RUN = latestRun('/root/tensorez-next/cli/output/jupiter_mvi_6906');
+  const REAL_RUN = latestRun(`${REPO}/cli/output/jupiter_mvi_6906`);
   assert.ok(REAL_RUN, 'no completed jupiter_mvi_6906 run found — run the CLI first');
   const exp = expectations(REAL_RUN);
 

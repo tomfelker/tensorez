@@ -20,6 +20,10 @@ EXAMPLES = CLI_ROOT.parent / "examples"
 SYNTHETIC_SER = EXAMPLES / "synthetic_planet.ser"
 TRUTH_NPY = EXAMPLES / "truth.npy"
 
+# synthetic_planet.ser is ~24 MB and deliberately not in git; generate it once.
+if not SYNTHETIC_SER.exists():
+    subprocess.run([sys.executable, str(EXAMPLES / "gen_synthetic.py")], check=True)
+
 
 def run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
@@ -60,7 +64,7 @@ version = 0
 name = "synthetic"
 
 [lights]
-paths = ["{SYNTHETIC_SER}"]
+paths = ["{SYNTHETIC_SER.as_posix()}"]
 
 [align]
 center_of_mass = true
@@ -73,7 +77,7 @@ stdevs_above_mean = {stdevs_above_mean}
 steepness = 3.0
 
 [output]
-dir = "{out_dir}"
+dir = "{out_dir.as_posix()}"
 debug_frames = 3
 """)
     return path

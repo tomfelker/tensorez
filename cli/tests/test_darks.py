@@ -43,15 +43,15 @@ def test_darks_subtracted_and_cached(tmp_path: Path) -> None:
 version = 0
 name = "darks"
 [lights]
-paths = ["{lights_path}"]
+paths = ["{lights_path.as_posix()}"]
 [darks]
-paths = ["{darks_path}"]
+paths = ["{darks_path.as_posix()}"]
 [lucky]
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 6.0
 isoplanatic_patch_pixels = 10.0
 [output]
-dir = "{tmp_path / 'out'}"
+dir = "{(tmp_path / 'out').as_posix()}"
 debug_frames = 0
 """)
 

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { gotoApp, newPage, shoot, checkNoPageErrors } from './helper.mjs';
+import fs from 'node:fs';
+import { REPO, gotoApp, newPage, shoot, checkNoPageErrors } from './helper.mjs';
 
-const SER_FILE = '/root/tensorez-next/examples/synthetic_planet.ser';
+const SER_FILE = `${REPO}/examples/synthetic_planet.ser`;
 
 // Copy the WebGL canvas into a 2D canvas and count non-black pixels.
 async function nonBlackPixels(page) {
@@ -23,6 +24,8 @@ async function nonBlackPixels(page) {
 }
 
 export default async function run(browser) {
+  assert.ok(fs.existsSync(SER_FILE),
+    `${SER_FILE} missing — run \`python examples/gen_synthetic.py\` (or the CLI tests) first`);
   const page = await newPage(browser);
   await gotoApp(page);
   await page.click('.nav-btn[data-view=ser]');

@@ -97,9 +97,9 @@ def test_bayer_ser_read_and_even_shift_enforcement(tmp_path: Path) -> None:
 version = 0
 name = "bayer"
 [lights]
-paths = ["{path}"]
+paths = ["{path.as_posix()}"]
 [output]
-dir = "{tmp_path / 'out'}"
+dir = "{(tmp_path / 'out').as_posix()}"
 """)
     proc = run_cli(["run", str(recipe)], cwd=tmp_path)
     assert proc.returncode != 0

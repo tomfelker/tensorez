@@ -34,7 +34,7 @@ version = 0
 name = "deconv"
 
 [lights]
-paths = ["{SYNTHETIC_SER}"]
+paths = ["{SYNTHETIC_SER.as_posix()}"]
 
 [align]
 crop = [192, 192]
@@ -132,7 +132,7 @@ def test_deconv_wavelength_channel_mismatch_is_runtime_error(tmp_path: Path) -> 
 version = 0
 name = "mono"
 [lights]
-paths = ["{path}"]
+paths = ["{path.as_posix()}"]
 [lucky]
 crossover_wavelength_pixels = 6.0
 isoplanatic_patch_pixels = 10.0
@@ -141,7 +141,7 @@ diameter_cm = 20.0
 pixel_scale_arcsec = 0.25
 wavelengths_nm = [700.0, 530.0, 470.0]
 [output]
-dir = "{tmp_path / 'out'}"
+dir = "{(tmp_path / 'out').as_posix()}"
 debug_frames = 0
 """)
     proc = run_cli(["run", str(recipe)], cwd=tmp_path)
@@ -167,7 +167,7 @@ def deconv_run(tmp_path_factory: pytest.TempPathFactory) -> DeconvRun:
     recipe.write_text(
         DECONV_RECIPE.replace(
             "[output]\ndebug_frames = 0",
-            f'[output]\ndir = "{workdir / "out"}"\ndebug_frames = 0',
+            f'[output]\ndir = "{(workdir / "out").as_posix()}"\ndebug_frames = 0',
         )
     )
     t0 = time.monotonic()
@@ -267,7 +267,7 @@ def test_deconv_frame_selection_modes(tmp_path: Path, frames_mode: str) -> None:
 version = 0
 name = "modes"
 [lights]
-paths = ["{SYNTHETIC_SER}"]
+paths = ["{SYNTHETIC_SER.as_posix()}"]
 end_frame = 10
 [align]
 crop = [128, 128]
@@ -282,7 +282,7 @@ diameter_cm = 20.0
 pixel_scale_arcsec = 0.25
 wavelengths_nm = [700.0, 530.0, 470.0]
 [output]
-dir = "{tmp_path / 'out'}"
+dir = "{(tmp_path / 'out').as_posix()}"
 debug_frames = 0
 """)
     proc = run_cli(["run", str(recipe)], cwd=tmp_path)

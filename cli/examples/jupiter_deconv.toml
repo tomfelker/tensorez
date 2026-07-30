@@ -10,7 +10,7 @@ version = 0
 name = "jupiter_deconv"
 
 [lights]
-paths = ["/root/tensorez/data/jupiter_mvi_6906/????????.png"]
+paths = ["../../data/jupiter_mvi_6906/????????.png"]
 
 [align]
 center_of_mass = true

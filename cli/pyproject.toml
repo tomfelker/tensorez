@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 # The [deconv] recipe stage (multi-frame blind deconvolution).
 deconv = ["torchmfbd", "scipy"]
+dev = ["pytest"]
 
 [project.scripts]
 tensorez = "tensorez.cli:main"

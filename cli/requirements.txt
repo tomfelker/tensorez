@@ -1,0 +1,17 @@
+# TensoRez CLI — install into a virtualenv with:
+#
+#   pip install -r requirements.txt
+#
+# The extra index serves NVIDIA CUDA 13.0 builds of PyTorch; pip prefers them
+# over the CPU-only PyPI wheels when both match. If you have no NVIDIA GPU and
+# want a much smaller download, install with the CPU wheels instead:
+#
+#   pip install -e .[deconv] --extra-index-url https://download.pytorch.org/whl/cpu
+#
+# (See README.md for the full setup walkthrough.)
+
+--extra-index-url https://download.pytorch.org/whl/cu130
+
+# The package itself (editable), plus the [deconv] extra for the optional
+# multi-frame blind deconvolution stage (torchmfbd).
+-e .[deconv]
