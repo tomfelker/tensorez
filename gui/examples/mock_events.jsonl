@@ -1,0 +1,84 @@
+{"event":"run_start","recipe_path":"examples/jupiter_demo.toml","recipe":{"recipe":{"version":0,"name":"jupiter_demo"},"lights":{"paths":["data/jupiter.ser"],"start_frame":0,"frame_step":1,"end_frame":300},"darks":{"paths":["data/darks.ser"]},"align":{"center_of_mass":true,"only_even_shifts":false,"crop":[512,512],"crop_align":2,"crop_offsets":[0,0]},"lucky":{"algorithm":"frequency_bands","noise_wavelength_pixels":2,"crossover_wavelength_pixels":35,"isoplanatic_patch_pixels":55,"channel_crosstalk":0,"selection":"sigmoid","stdevs_above_mean":2.5,"steepness":3},"deconv":{"method":"torchmfbd","frames":"lucky_top","top_n":12,"diameter_cm":20,"central_obscuration_cm":0,"pixel_scale_arcsec":0.25,"wavelengths_nm":[700,530,470],"psf_model":"kl","n_modes":20,"iterations":100,"optimizer":"adam","lr_obj":0.02,"lr_modes":0.08,"apodization_border":0,"frequency_cutoff":[0.2,0.3]},"output":{"dir":"output","debug_frames":10}},"run_dir":"output/jupiter_demo/2026-07-29T17-30-00Z","frame_count":300,"t":0.151}
+{"event":"log","level":"info","message":"loaded 300 frames from data/jupiter.ser (RGB, 16-bit, 512×512)","t":0.236}
+{"event":"stage_start","stage":"lights","cached":false,"t":0.517}
+{"event":"progress","stage":"lights","current":38,"total":300,"message":"decoding frames","t":0.656}
+{"event":"progress","stage":"lights","current":75,"total":300,"message":"decoding frames","t":0.856}
+{"event":"progress","stage":"lights","current":113,"total":300,"message":"decoding frames","t":0.917}
+{"event":"progress","stage":"lights","current":150,"total":300,"message":"decoding frames","t":1.146}
+{"event":"progress","stage":"lights","current":188,"total":300,"message":"decoding frames","t":1.243}
+{"event":"progress","stage":"lights","current":225,"total":300,"message":"decoding frames","t":1.642}
+{"event":"progress","stage":"lights","current":263,"total":300,"message":"decoding frames","t":2.09}
+{"event":"progress","stage":"lights","current":300,"total":300,"message":"decoding frames","t":2.482}
+{"event":"stage_end","stage":"lights","seconds":3.1,"t":2.731}
+{"event":"stage_start","stage":"darks","cached":true,"t":3.038}
+{"event":"stage_end","stage":"darks","seconds":0,"t":3.433}
+{"event":"log","level":"info","message":"darks served from cache (cache/darks/8c1f2a90d3b4e5f6)","t":3.721}
+{"event":"stage_start","stage":"align","cached":false,"t":3.808}
+{"event":"progress","stage":"align","current":30,"total":300,"message":"center-of-mass alignment","t":3.914}
+{"event":"progress","stage":"align","current":60,"total":300,"message":"center-of-mass alignment","t":4.344}
+{"event":"progress","stage":"align","current":90,"total":300,"message":"center-of-mass alignment","t":4.764}
+{"event":"progress","stage":"align","current":120,"total":300,"message":"center-of-mass alignment","t":5.169}
+{"event":"progress","stage":"align","current":150,"total":300,"message":"center-of-mass alignment","t":5.44}
+{"event":"progress","stage":"align","current":180,"total":300,"message":"center-of-mass alignment","t":5.562}
+{"event":"progress","stage":"align","current":210,"total":300,"message":"center-of-mass alignment","t":5.832}
+{"event":"progress","stage":"align","current":240,"total":300,"message":"center-of-mass alignment","t":5.986}
+{"event":"progress","stage":"align","current":270,"total":300,"message":"center-of-mass alignment","t":6.413}
+{"event":"progress","stage":"align","current":300,"total":300,"message":"center-of-mass alignment","t":6.791}
+{"event":"artifact","stage":"align","name":"com_track","kind":"preview","path":"stages/align/com_track.png","width":256,"height":256,"t":6.903}
+{"event":"artifact","stage":"align","name":"aligned_first_frame","kind":"preview","path":"stages/align/aligned_first_frame.png","width":256,"height":256,"t":7.285}
+{"event":"stage_end","stage":"align","seconds":5.2,"t":7.522}
+{"event":"stage_start","stage":"lucky","cached":false,"t":7.596}
+{"event":"progress","stage":"lucky","current":30,"total":300,"message":"pass 1/2 — measuring luckiness","t":7.655}
+{"event":"progress","stage":"lucky","current":60,"total":300,"message":"pass 1/2 — measuring luckiness","t":7.92}
+{"event":"progress","stage":"lucky","current":90,"total":300,"message":"pass 1/2 — measuring luckiness","t":8.302}
+{"event":"progress","stage":"lucky","current":120,"total":300,"message":"pass 1/2 — measuring luckiness","t":8.69}
+{"event":"progress","stage":"lucky","current":150,"total":300,"message":"pass 1/2 — measuring luckiness","t":9.013}
+{"event":"progress","stage":"lucky","current":180,"total":300,"message":"pass 1/2 — measuring luckiness","t":9.215}
+{"event":"progress","stage":"lucky","current":210,"total":300,"message":"pass 1/2 — measuring luckiness","t":9.499}
+{"event":"progress","stage":"lucky","current":240,"total":300,"message":"pass 1/2 — measuring luckiness","t":9.828}
+{"event":"progress","stage":"lucky","current":270,"total":300,"message":"pass 1/2 — measuring luckiness","t":10.162}
+{"event":"progress","stage":"lucky","current":300,"total":300,"message":"pass 1/2 — measuring luckiness","t":10.5}
+{"event":"artifact","stage":"lucky","name":"weights_pass1","kind":"preview","path":"stages/lucky/weights_pass1.png","width":256,"height":256,"t":10.946}
+{"event":"artifact","stage":"lucky","name":"frame_0000","kind":"sequence_frame","frame":0,"path":"stages/lucky/frames/frame_0000.png","width":128,"height":128,"t":11.176}
+{"event":"artifact","stage":"lucky","name":"frame_0001","kind":"sequence_frame","frame":1,"path":"stages/lucky/frames/frame_0001.png","width":128,"height":128,"t":11.265}
+{"event":"artifact","stage":"lucky","name":"frame_0002","kind":"sequence_frame","frame":2,"path":"stages/lucky/frames/frame_0002.png","width":128,"height":128,"t":11.392}
+{"event":"artifact","stage":"lucky","name":"frame_0003","kind":"sequence_frame","frame":3,"path":"stages/lucky/frames/frame_0003.png","width":128,"height":128,"t":11.621}
+{"event":"progress","stage":"lucky","current":30,"total":300,"message":"pass 2/2 — weighted accumulation","t":11.721}
+{"event":"progress","stage":"lucky","current":60,"total":300,"message":"pass 2/2 — weighted accumulation","t":12.079}
+{"event":"progress","stage":"lucky","current":90,"total":300,"message":"pass 2/2 — weighted accumulation","t":12.366}
+{"event":"progress","stage":"lucky","current":120,"total":300,"message":"pass 2/2 — weighted accumulation","t":12.738}
+{"event":"progress","stage":"lucky","current":150,"total":300,"message":"pass 2/2 — weighted accumulation","t":12.944}
+{"event":"progress","stage":"lucky","current":180,"total":300,"message":"pass 2/2 — weighted accumulation","t":13.08}
+{"event":"progress","stage":"lucky","current":210,"total":300,"message":"pass 2/2 — weighted accumulation","t":13.239}
+{"event":"progress","stage":"lucky","current":240,"total":300,"message":"pass 2/2 — weighted accumulation","t":13.297}
+{"event":"progress","stage":"lucky","current":270,"total":300,"message":"pass 2/2 — weighted accumulation","t":13.458}
+{"event":"progress","stage":"lucky","current":300,"total":300,"message":"pass 2/2 — weighted accumulation","t":13.642}
+{"event":"artifact","stage":"lucky","name":"luckiness_mean","kind":"preview","path":"stages/lucky/luckiness_mean.png","width":256,"height":256,"t":14.045}
+{"event":"artifact","stage":"lucky","name":"unweighted_average","kind":"preview","path":"stages/lucky/unweighted_average.png","width":256,"height":256,"t":14.477}
+{"event":"artifact","stage":"lucky","name":"luckiness","kind":"array","path":"stages/lucky/luckiness.npy","t":14.604}
+{"event":"artifact","stage":"lucky","name":"frame_scores","kind":"array","path":"stages/lucky/frame_scores.npy","t":15.003}
+{"event":"log","level":"info","message":"lucky: best frames by mean luckiness: 81 (0.3129), 85 (0.3120), 28 (0.3117), …","t":15.286}
+{"event":"artifact","stage":"lucky","name":"lucky_stack","kind":"image","path":"stages/lucky/lucky_stack.tif","t":15.47}
+{"event":"artifact","stage":"lucky","name":"lucky_stack","kind":"preview","path":"stages/lucky/lucky_stack.png","width":256,"height":256,"t":15.646}
+{"event":"stage_end","stage":"lucky","seconds":41.7,"t":15.748}
+{"event":"stage_start","stage":"deconv","cached":false,"t":16.19}
+{"event":"log","level":"info","message":"deconv: torchmfbd on 12 frame(s): [28, 29, 31, 81, 82, 85, 86, 87, 88, 91, 92, 95]","t":16.281}
+{"event":"progress","stage":"deconv","current":10,"total":100,"message":"torchmfbd loss 0.990212","t":16.699}
+{"event":"progress","stage":"deconv","current":20,"total":100,"message":"torchmfbd loss 0.856746","t":17.072}
+{"event":"progress","stage":"deconv","current":30,"total":100,"message":"torchmfbd loss 0.745266","t":17.295}
+{"event":"progress","stage":"deconv","current":40,"total":100,"message":"torchmfbd loss 0.652150","t":17.629}
+{"event":"progress","stage":"deconv","current":50,"total":100,"message":"torchmfbd loss 0.574373","t":17.802}
+{"event":"progress","stage":"deconv","current":60,"total":100,"message":"torchmfbd loss 0.509408","t":17.899}
+{"event":"progress","stage":"deconv","current":70,"total":100,"message":"torchmfbd loss 0.455144","t":18.153}
+{"event":"progress","stage":"deconv","current":80,"total":100,"message":"torchmfbd loss 0.409820","t":18.25}
+{"event":"progress","stage":"deconv","current":90,"total":100,"message":"torchmfbd loss 0.371962","t":18.397}
+{"event":"progress","stage":"deconv","current":100,"total":100,"message":"torchmfbd loss 0.340340","t":18.689}
+{"event":"artifact","stage":"deconv","name":"psf_examples","kind":"preview","path":"stages/deconv/psf_examples.png","width":256,"height":256,"t":19.018}
+{"event":"artifact","stage":"deconv","name":"loss_history","kind":"array","path":"stages/deconv/loss_history.npy","t":19.264}
+{"event":"stage_end","stage":"deconv","seconds":38.4,"t":19.398}
+{"event":"stage_start","stage":"output","cached":false,"t":19.539}
+{"event":"artifact","stage":"output","name":"final_preview","kind":"preview","path":"final_preview.png","width":256,"height":256,"t":19.867}
+{"event":"artifact","stage":"output","name":"final","kind":"image","path":"final.tif","t":20.269}
+{"event":"artifact","stage":"output","name":"final_exact","kind":"array","path":"final.npy","t":20.646}
+{"event":"stage_end","stage":"output","seconds":0.8,"t":20.975}
+{"event":"done","seconds":89.4,"final":"final.tif","t":21.361}

@@ -1,0 +1,26 @@
+{
+  "name": "tensorez-gui",
+  "version": "0.1.0",
+  "description": "TensoRez Next — planetary lucky-imaging stacker GUI",
+  "main": "main.js",
+  "directories": {
+    "example": "examples",
+    "test": "test"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "node dev-server.mjs",
+    "gen-mock": "node scripts/gen-mock.mjs",
+    "test": "node test/run-all.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "smol-toml": "^1.7.1"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "playwright": "^1.56.0"
+  }
+}

@@ -1,0 +1,38 @@
+# The sweep-winning Jupiter recipe (sweep_dc_c45_top8) plus per-channel
+# center-of-mass alignment: each color channel is centered independently,
+# removing the constant atmospheric-dispersion offset between R, G and B.
+# The integer shifts dither frame to frame, and the deconvolution's
+# per-channel tip/tilt modes absorb the sub-pixel residual.
+
+[recipe]
+version = 0
+name = "jupiter_best_dispersion"
+
+[lights]
+paths = ["/root/tensorez/data/jupiter_mvi_6906/????????.png"]
+
+[align]
+center_of_mass = true
+per_channel = true
+crop = [400, 400]
+
+[lucky]
+crossover_wavelength_pixels = 45.0
+isoplanatic_patch_pixels = 70.0
+stdevs_above_mean = 2.0
+steepness = 3.0
+
+[deconv]
+frames = "lucky_top"
+top_n = 8
+iterations = 100
+n_modes = 20
+frequency_cutoff = [0.2, 0.3]
+focal_length_mm = 2800.0
+barlow = 2.0
+pixel_size_um = 4.3
+wavelengths_nm = [700.0, 530.0, 470.0]
+
+[output]
+dir = "../output"
+debug_frames = 0

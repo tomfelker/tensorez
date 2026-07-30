@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tensorez"
+version = "0.1.0"
+description = "TensoRez Next — planetary lucky-imaging stacker (PyTorch CLI)"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "Pillow",
+    "tifffile",
+]
+
+[project.optional-dependencies]
+# The [deconv] recipe stage (multi-frame blind deconvolution).
+deconv = ["torchmfbd", "scipy"]
+
+[project.scripts]
+tensorez = "tensorez.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tensorez*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

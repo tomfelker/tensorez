@@ -1,0 +1,43 @@
+{"event":"run_start","recipe_path":"examples/jupiter_demo.toml","recipe":{"recipe":{"version":0,"name":"jupiter_demo"},"lights":{"paths":["data/jupiter.ser"],"start_frame":0,"frame_step":1,"end_frame":300},"darks":{"paths":["data/darks.ser"]},"align":{"center_of_mass":true,"only_even_shifts":false,"crop":[512,512],"crop_align":2,"crop_offsets":[0,0]},"lucky":{"algorithm":"frequency_bands","noise_wavelength_pixels":2,"crossover_wavelength_pixels":35,"isoplanatic_patch_pixels":55,"channel_crosstalk":0,"selection":"sigmoid","stdevs_above_mean":2.5,"steepness":3},"deconv":{"method":"torchmfbd","frames":"lucky_top","top_n":12,"diameter_cm":20,"central_obscuration_cm":0,"pixel_scale_arcsec":0.25,"wavelengths_nm":[700,530,470],"psf_model":"kl","n_modes":20,"iterations":100,"optimizer":"adam","lr_obj":0.02,"lr_modes":0.08,"apodization_border":0,"frequency_cutoff":[0.2,0.3]},"output":{"dir":"output","debug_frames":10}},"run_dir":"output/jupiter_demo/2026-07-29T17-30-00Z","frame_count":300,"t":0.211}
+{"event":"log","level":"info","message":"loaded 300 frames from data/jupiter.ser (RGB, 16-bit, 512×512)","t":0.322}
+{"event":"stage_start","stage":"lights","cached":false,"t":0.422}
+{"event":"progress","stage":"lights","current":38,"total":300,"message":"decoding frames","t":0.688}
+{"event":"progress","stage":"lights","current":75,"total":300,"message":"decoding frames","t":0.999}
+{"event":"progress","stage":"lights","current":113,"total":300,"message":"decoding frames","t":1.444}
+{"event":"progress","stage":"lights","current":150,"total":300,"message":"decoding frames","t":1.665}
+{"event":"progress","stage":"lights","current":188,"total":300,"message":"decoding frames","t":2.013}
+{"event":"progress","stage":"lights","current":225,"total":300,"message":"decoding frames","t":2.235}
+{"event":"progress","stage":"lights","current":263,"total":300,"message":"decoding frames","t":2.304}
+{"event":"progress","stage":"lights","current":300,"total":300,"message":"decoding frames","t":2.385}
+{"event":"stage_end","stage":"lights","seconds":3.1,"t":2.765}
+{"event":"stage_start","stage":"darks","cached":true,"t":3.206}
+{"event":"stage_end","stage":"darks","seconds":0,"t":3.576}
+{"event":"log","level":"info","message":"darks served from cache (cache/darks/8c1f2a90d3b4e5f6)","t":3.694}
+{"event":"stage_start","stage":"align","cached":false,"t":3.898}
+{"event":"progress","stage":"align","current":30,"total":300,"message":"center-of-mass alignment","t":4.062}
+{"event":"progress","stage":"align","current":60,"total":300,"message":"center-of-mass alignment","t":4.308}
+{"event":"progress","stage":"align","current":90,"total":300,"message":"center-of-mass alignment","t":4.694}
+{"event":"progress","stage":"align","current":120,"total":300,"message":"center-of-mass alignment","t":5.109}
+{"event":"progress","stage":"align","current":150,"total":300,"message":"center-of-mass alignment","t":5.238}
+{"event":"progress","stage":"align","current":180,"total":300,"message":"center-of-mass alignment","t":5.415}
+{"event":"progress","stage":"align","current":210,"total":300,"message":"center-of-mass alignment","t":5.677}
+{"event":"progress","stage":"align","current":240,"total":300,"message":"center-of-mass alignment","t":5.833}
+{"event":"progress","stage":"align","current":270,"total":300,"message":"center-of-mass alignment","t":6.044}
+{"event":"progress","stage":"align","current":300,"total":300,"message":"center-of-mass alignment","t":6.099}
+{"event":"artifact","stage":"align","name":"com_track","kind":"preview","path":"stages/align/com_track.png","width":256,"height":256,"t":6.408}
+{"event":"artifact","stage":"align","name":"aligned_first_frame","kind":"preview","path":"stages/align/aligned_first_frame.png","width":256,"height":256,"t":6.605}
+{"event":"stage_end","stage":"align","seconds":5.2,"t":6.845}
+{"event":"stage_start","stage":"lucky","cached":false,"t":6.997}
+{"event":"progress","stage":"lucky","current":30,"total":300,"message":"pass 1/2 — measuring luckiness","t":7.284}
+{"event":"progress","stage":"lucky","current":60,"total":300,"message":"pass 1/2 — measuring luckiness","t":7.614}
+{"event":"progress","stage":"lucky","current":90,"total":300,"message":"pass 1/2 — measuring luckiness","t":7.885}
+{"event":"progress","stage":"lucky","current":120,"total":300,"message":"pass 1/2 — measuring luckiness","t":8.177}
+{"event":"progress","stage":"lucky","current":150,"total":300,"message":"pass 1/2 — measuring luckiness","t":8.32}
+{"event":"progress","stage":"lucky","current":180,"total":300,"message":"pass 1/2 — measuring luckiness","t":8.522}
+{"event":"progress","stage":"lucky","current":210,"total":300,"message":"pass 1/2 — measuring luckiness","t":8.739}
+{"event":"progress","stage":"lucky","current":240,"total":300,"message":"pass 1/2 — measuring luckiness","t":9.163}
+{"event":"progress","stage":"lucky","current":270,"total":300,"message":"pass 1/2 — measuring luckiness","t":9.307}
+{"event":"progress","stage":"lucky","current":300,"total":300,"message":"pass 1/2 — measuring luckiness","t":9.726}
+{"event":"artifact","stage":"lucky","name":"weights_pass1","kind":"preview","path":"stages/lucky/weights_pass1.png","width":256,"height":256,"t":10.156}
+{"event":"log","level":"warning","message":"GPU memory low: 214 MiB free before pass 2","t":10.434}
+{"event":"error","stage":"lucky","message":"CUDA out of memory: tried to allocate 2.50 GiB (GPU 0; 3.94 GiB total)","traceback":"Traceback (most recent call last):\n  File \"tensorez/lucky.py\", line 214, in weighted_accumulate\n    acc = acc + weights[:, None] * bands\ntorch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.50 GiB","t":10.854}

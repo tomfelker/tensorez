@@ -1,0 +1,37 @@
+# Jupiter + multi-frame blind deconvolution of the 10 luckiest frames,
+# with the author's real rig: Celestron CPC 1100 (defaults: 27.94 cm
+# aperture, 9.5 cm obstruction, 2800 mm focal length) with a 2x barlow and
+# a 4.3 um camera — the pixel scale is computed as
+# 206.265 * 4.3 / (2800 * 2) ~= 0.158 arcsec/pixel.
+# The source is 8-bit sRGB DSLR video, so temper expectations accordingly.
+
+[recipe]
+version = 0
+name = "jupiter_deconv"
+
+[lights]
+paths = ["/root/tensorez/data/jupiter_mvi_6906/????????.png"]
+
+[align]
+center_of_mass = true
+crop = [400, 400]
+
+[lucky]
+crossover_wavelength_pixels = 30.0
+isoplanatic_patch_pixels = 50.0
+stdevs_above_mean = 2.0
+steepness = 3.0
+
+[deconv]
+frames = "lucky_top"
+top_n = 10
+iterations = 80
+focal_length_mm = 2800.0
+barlow = 2.0
+pixel_size_um = 4.3
+wavelengths_nm = [700.0, 530.0, 470.0]
+n_modes = 20
+
+[output]
+dir = "../output"
+debug_frames = 0

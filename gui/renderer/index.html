@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TensoRez</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <nav id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">✦</div>
+        <div class="brand-name">TensoRez</div>
+        <div class="brand-sub">lucky imaging</div>
+      </div>
+      <button class="nav-btn" data-view="recipe">Recipe</button>
+      <button class="nav-btn" data-view="run">Run</button>
+      <button class="nav-btn" data-view="results">Results</button>
+      <button class="nav-btn" data-view="ser">SER Player</button>
+      <div class="nav-spacer"></div>
+      <div id="bridge-badge" class="bridge-badge"></div>
+    </nav>
+
+    <main id="views">
+      <section id="view-recipe" class="view" hidden></section>
+      <section id="view-run" class="view" hidden></section>
+      <section id="view-results" class="view" hidden></section>
+      <section id="view-ser" class="view" hidden></section>
+    </main>
+  </div>
+
+  <div id="lightbox" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

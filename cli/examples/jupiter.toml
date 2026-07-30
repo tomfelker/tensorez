@@ -1,0 +1,47 @@
+# Real-data smoke test: 100 PNG frames of Jupiter (512x512, ~350px planet),
+# captured as MVI_6906.  Paths resolve relative to this file.
+
+[recipe]
+version = 0
+name = "jupiter_mvi_6906"
+
+[lights]
+paths = ["/root/tensorez/data/jupiter_mvi_6906/????????.png"]
+
+[align]
+center_of_mass = true
+crop = [400, 400]
+
+[lucky]
+algorithm = "frequency_bands"
+noise_wavelength_pixels = 2.0
+crossover_wavelength_pixels = 30.0
+isoplanatic_patch_pixels = 50.0
+channel_crosstalk = 0.0
+
+selection = "sigmoid"
+stdevs_above_mean = 2.0
+steepness = 3.0
+
+# Optional multi-frame blind deconvolution of the top lucky frames
+# (torchmfbd).  Uncomment and check the optics — aperture defaults to the
+# author's Celestron CPC 1100 (27.94 cm, 9.5 cm obstruction, 2800 mm).
+# Pixel scale: EITHER pixel_scale_arcsec directly, OR pixel_size_um
+# (+ focal_length_mm, barlow) to compute it — never both:
+# [deconv]
+# frames = "lucky_top"            # or "all"
+# top_n = 12
+# # diameter_cm = 27.94           # override for a different telescope
+# # central_obscuration_cm = 9.5
+# focal_length_mm = 2800.0
+# barlow = 2.0
+# pixel_size_um = 4.3             # -> 206.265 * um / (mm * barlow) ~= 0.158"/px
+# # pixel_scale_arcsec = 0.158    # ...or give the scale directly instead
+# wavelengths_nm = [700.0, 530.0, 470.0]   # one per channel (R, G, B)
+# psf_model = "kl"                # or "zernike"
+# n_modes = 20                    # 2, 5, 9, 14, 20, 27, ... (full radial degrees)
+# iterations = 100
+
+[output]
+dir = "../output"
+debug_frames = 5
