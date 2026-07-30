@@ -47,6 +47,11 @@ class LightsConfig:
 @dataclass(frozen=True)
 class DarksConfig:
     paths: tuple[str, ...]
+    # Same frame selection as [lights] — lets darks be carved out of a capture
+    # that contains them (e.g. the empty sky before/after an ISS pass).
+    start_frame: int = 0
+    frame_step: int = 1
+    end_frame: int | None = None
 
 
 @dataclass(frozen=True)
@@ -188,7 +193,13 @@ class Recipe:
         if self.lights.end_frame is not None:
             d["lights"]["end_frame"] = self.lights.end_frame
         if self.darks is not None:
-            d["darks"] = {"paths": list(self.darks.paths)}
+            d["darks"] = {
+                "paths": list(self.darks.paths),
+                "start_frame": self.darks.start_frame,
+                "frame_step": self.darks.frame_step,
+            }
+            if self.darks.end_frame is not None:
+                d["darks"]["end_frame"] = self.darks.end_frame
         if self.align.crop is not None:
             d["align"]["crop"] = list(self.align.crop)
         if self.lucky_scoring is not None:
@@ -389,7 +400,14 @@ def load_recipe(path: str | Path) -> Recipe:
     darks = None
     if "darks" in data:
         s = _Section("darks", data["darks"])
-        darks = DarksConfig(paths=_resolve_paths(s.get_str_list("paths", required=True), base))
+        darks = DarksConfig(
+            paths=_resolve_paths(s.get_str_list("paths", required=True), base),
+            start_frame=s.get_int("start_frame", 0, minimum=0),
+            frame_step=s.get_int("frame_step", 1, minimum=1),
+            end_frame=s.get_int("end_frame", None, minimum=1),
+        )
+        if darks.end_frame is not None and darks.end_frame <= darks.start_frame:
+            raise RecipeError("[darks] end_frame: must be greater than start_frame")
         s.check_no_unknown_keys()
 
     s = _Section("align", data.get("align", {}))

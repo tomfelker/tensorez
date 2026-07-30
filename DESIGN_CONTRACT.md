@@ -44,6 +44,9 @@ debayer = "bilinear"         # how Bayer sources become channels (ignored otherw
 
 [darks]                      # optional section; omit to skip dark calibration
 paths = ["data/darks.ser"]
+start_frame = 0              # same selection keys as [lights] — carve the darks out
+frame_step = 1               # of a capture that contains them (e.g. the empty sky
+end_frame = 100              # before/after an ISS pass); end_frame exclusive
 # Produces master dark (mean) AND per-pixel variance (fed to luckiness as noise term).
 
 [align]

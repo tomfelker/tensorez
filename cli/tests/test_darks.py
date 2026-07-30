@@ -11,7 +11,12 @@ from tensorez import ser
 
 
 def _make_data(tmp_path: Path) -> tuple[Path, Path]:
-    """Tiny MONO sequence: a bright blob wandering over a hot background."""
+    """Tiny MONO sequence: a bright blob wandering over a hot background.
+
+    The darks file starts with 4 saturated junk frames (as if the target were
+    still in view); the recipe below must skip them via start_frame or the
+    master dark is ruined — which also proves [darks] frame selection works.
+    """
     rng = np.random.default_rng(7)
     h = w = 32
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -25,8 +30,9 @@ def _make_data(tmp_path: Path) -> tuple[Path, Path]:
         lights.append(np.clip(frame, 0, 1))
     lights_u16 = (np.stack(lights)[..., None] * 65535).astype(np.uint16)
 
+    junk = np.ones((4, h, w, 1), dtype=np.float32)
     darks = offset + rng.normal(0, 0.01, (16, h, w, 1)).astype(np.float32)
-    darks_u16 = (np.clip(darks, 0, 1) * 65535).astype(np.uint16)
+    darks_u16 = (np.clip(np.concatenate([junk, darks]), 0, 1) * 65535).astype(np.uint16)
 
     lights_path = tmp_path / "lights.ser"
     darks_path = tmp_path / "darks.ser"
@@ -46,6 +52,7 @@ name = "darks"
 paths = ["{lights_path.as_posix()}"]
 [darks]
 paths = ["{darks_path.as_posix()}"]
+start_frame = 4
 [local_lucky]
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 6.0

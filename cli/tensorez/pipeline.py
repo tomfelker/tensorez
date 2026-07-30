@@ -200,7 +200,13 @@ class Pipeline:
             try:
                 # Darks come from the same sensor, so the same debayer mode
                 # keeps their geometry and channels matching the lights.
-                darks = ImageSequence(list(r.darks.paths), debayer=r.lights.debayer)
+                darks = ImageSequence(
+                    list(r.darks.paths),
+                    start_frame=r.darks.start_frame,
+                    frame_step=r.darks.frame_step,
+                    end_frame=r.darks.end_frame,
+                    debayer=r.lights.debayer,
+                )
             except (FileNotFoundError, ValueError) as e:
                 raise PipelineError(str(e), stage="darks")
         return lights, darks

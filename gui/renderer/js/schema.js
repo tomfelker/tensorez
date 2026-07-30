@@ -54,10 +54,16 @@ export const SCHEMA = [
     section: 'darks',
     label: 'Darks',
     optionalSection: true,
-    help: 'Optional dark calibration; master dark (mean) + per-pixel variance.',
+    help: 'Optional dark calibration; master dark (mean) + per-pixel variance. ' +
+      'Frame selection lets darks be carved out of a capture that contains them ' +
+      '(e.g. the empty sky before/after an ISS pass).',
     fields: [
       { key: 'paths', type: 'paths', default: ['data/darks.ser'], pathKind: 'file',
         filters: [{ name: 'SER / stills', extensions: ['ser', 'png', 'tif', 'jpg'] }] },
+      { key: 'start_frame', type: 'int', optional: true, default: 0, min: 0, help: 'inclusive' },
+      { key: 'frame_step', type: 'int', optional: true, default: 1, min: 1 },
+      { key: 'end_frame', type: 'int', optional: true, default: 300, min: 1,
+        help: 'exclusive; leave unset to use all frames' },
     ],
   },
   {
