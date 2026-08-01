@@ -64,6 +64,32 @@ export default async function run(browser) {
     document.querySelector('#run-status').textContent === 'Cancelled');
   assert.ok(await page.locator('#run-start').isEnabled());
 
+  // ---- runs/cache locations are settings, and reach the CLI ----
+  await page.click('#run-dirs summary');
+  await page.fill('#run-runs-dir', '/fast/runs');
+  await page.locator('#run-runs-dir').press('Tab');
+  await page.fill('#run-cache-dir', '/fast/cache');
+  await page.locator('#run-cache-dir').press('Tab');
+  const settings = JSON.parse(await page.evaluate(() =>
+    window.bridge.readTextFile('/appdata/settings.json')));
+  assert.equal(settings.runsDir, '/fast/runs', 'runs dir persisted to settings');
+  assert.equal(settings.cacheDir, '/fast/cache', 'cache dir persisted to settings');
+
+  // spawnRun must forward them (the CLI turns them into --runs-dir/--cache-dir)
+  await page.evaluate(() => {
+    const real = window.bridge.spawnRun;
+    window.__spawnArgs = null;
+    window.bridge.spawnRun = (opts) => { window.__spawnArgs = opts; return real(opts); };
+  });
+  await page.click('#run-demo-ok');
+  await page.waitForFunction(() => window.__spawnArgs);
+  const spawned = await page.evaluate(() => window.__spawnArgs);
+  assert.equal(spawned.runsDir, '/fast/runs');
+  assert.equal(spawned.cacheDir, '/fast/cache');
+  await page.click('#run-cancel');
+  await page.waitForFunction(() =>
+    document.querySelector('#run-status').textContent === 'Cancelled');
+
   // ---- failing run ----
   await page.click('#run-demo-err');
   await page.waitForSelector('.error-banner', { timeout: 30000 });

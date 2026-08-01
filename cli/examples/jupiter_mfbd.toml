@@ -5,10 +5,7 @@
 # with a 2x barlow and a 4.3 um camera — the pixel scale is computed as
 # 206.265 * 4.3 / (2800 * 2) ~= 0.158 arcsec/pixel.
 # The source is 8-bit sRGB DSLR video, so temper expectations accordingly.
-
-[recipe]
-version = 0
-name = "jupiter_mfbd"
+# Run from this directory: cd cli/examples && python -m tensorez run jupiter_mfbd.toml
 
 [lights]
 paths = ["../../data/jupiter_mvi_6906/????????.png"]
@@ -36,5 +33,4 @@ wavelengths_nm = [700.0, 530.0, 470.0]
 n_modes = 20
 
 [output]
-dir = "../output"
 debug_frames = 0

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 
-from conftest import TRUTH_NPY, SyntheticRuns
+from conftest import TRUTH_NPY, CliRun, SyntheticRuns, parse_events, run_cli
 
 
 def test_end_to_end_jsonl(synthetic_runs: SyntheticRuns) -> None:
@@ -17,7 +18,7 @@ def test_end_to_end_jsonl(synthetic_runs: SyntheticRuns) -> None:
     assert run.events[0]["frame_count"] == 60
     assert "recipe" in run.events[0]
     assert run.events[-1]["event"] == "done"
-    assert run.events[-1]["final"] == "final.tif"
+    assert run.events[-1]["products"] == ["local_lucky"]
 
     for e in run.events:
         assert "event" in e and "t" in e
@@ -35,10 +36,19 @@ def test_end_to_end_jsonl(synthetic_runs: SyntheticRuns) -> None:
         assert not e["path"].startswith("/")
         assert (run.run_dir / e["path"]).is_file(), e["path"]
 
-    # run dir layout per contract §3
+    # run dir layout per contract §3: <runs dir>/<recipe name>/<timestamp>/,
+    # holding the bookkeeping and every product in all three formats
+    assert run.run_dir.parent.name == "recipe"           # the recipe's stem
+    assert run.run_dir.parent.parent.name == "tensorez_runs"
     for name in ("manifest.json", "recipe.toml", "log.txt",
-                 "final_preview.png", "final.tif", "final.npy"):
+                 "local_lucky.png", "local_lucky.tif", "local_lucky.npy"):
         assert (run.run_dir / name).is_file(), name
+    # ...and the same products sit in the output dir, which is the recipe's
+    # business and quite separate from where runs are archived
+    out_dir = Path(run.events[0]["output_dir"])
+    assert out_dir not in run.run_dir.parents
+    for name in ("local_lucky.png", "local_lucky.tif", "local_lucky.npy"):
+        assert (out_dir / name).is_file(), name
 
     # log.txt mirrors the raw stream
     logged = [json.loads(line) for line in
@@ -56,20 +66,55 @@ def test_end_to_end_jsonl(synthetic_runs: SyntheticRuns) -> None:
     assert {e["frame"] for e in frames} == {0, 1, 2}
 
 
+def test_runs_and_cache_dirs_default_to_cwd_and_move(
+    synthetic_runs: SyntheticRuns, tmp_path: Path
+) -> None:
+    """Bulk data (run archives, cache) is a machine preference, not a recipe
+    key: it defaults beside you and relocates with one flag."""
+    workdir = synthetic_runs.workdir
+    # the session fixture ran here with no flags
+    assert (workdir / "tensorez_runs" / "recipe").is_dir()
+    assert (workdir / "tensorez_cache").is_dir()
+
+    scratch = tmp_path / "fast_disk"
+    proc = run_cli(
+        ["run", str(synthetic_runs.recipe),
+         "--runs-dir", str(scratch / "runs"), "--cache-dir", str(scratch / "cache")],
+        cwd=workdir,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    run = CliRun(proc, parse_events(proc.stdout), 0.0)
+
+    assert run.run_dir.parent == scratch / "runs" / "recipe"
+    assert (scratch / "cache").is_dir()
+    # ...while the products still land where the recipe says
+    assert Path(run.events[0]["output_dir"]) == workdir / "output"
+
+
+def test_human_readable_output_is_the_default(synthetic_runs: SyntheticRuns) -> None:
+    """No --events: stdout is for people, not for the GUI."""
+    proc = run_cli(["validate", str(synthetic_runs.recipe)],
+                   cwd=synthetic_runs.workdir, events=False)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout.startswith("recipe ok: recipe (60 frames)")
+    assert "cache hit" in proc.stdout
+    assert not proc.stdout.lstrip().startswith("{"), "default must not be JSONL"
+
+
 def test_lucky_beats_unweighted_average(synthetic_runs: SyntheticRuns) -> None:
     """(b) The core scientific claim: the lucky stack is closer to the truth
     than the unweighted aligned average of the same frames."""
     run = synthetic_runs.first
-    final = np.load(run.run_dir / "final.npy")
-    average = np.load(run.run_dir / "stages/local_lucky/unweighted_average.npy")
+    lucky = np.load(run.run_dir / "local_lucky.npy")
+    average = np.load(run.run_dir / "examples/local_lucky/unweighted_average.npy")
     truth = np.load(TRUTH_NPY)
 
-    h, w = final.shape[:2]
+    h, w = lucky.shape[:2]
     y = (truth.shape[0] - h) // 2
     x = (truth.shape[1] - w) // 2
     truth_crop = truth[y : y + h, x : x + w]
 
-    mse_lucky = float(((final - truth_crop) ** 2).mean())
+    mse_lucky = float(((lucky - truth_crop) ** 2).mean())
     mse_average = float(((average - truth_crop) ** 2).mean())
     assert mse_lucky < mse_average, (mse_lucky, mse_average)
 
@@ -101,8 +146,8 @@ def test_second_run_uses_cache(synthetic_runs: SyntheticRuns) -> None:
     assert second_pipeline_s < first_pipeline_s * 0.75, (first_pipeline_s, second_pipeline_s)
 
     # identical recipe -> identical result
-    a = np.load(first.run_dir / "final.npy")
-    b = np.load(second.run_dir / "final.npy")
+    a = np.load(first.run_dir / "local_lucky.npy")
+    b = np.load(second.run_dir / "local_lucky.npy")
     assert np.array_equal(a, b)
 
 
@@ -121,6 +166,6 @@ def test_selection_change_reuses_pass1_stats(synthetic_runs: SyntheticRuns) -> N
     assert all("pass 2" in e.get("message", "") for e in lucky_progress)
 
     # different selection -> different result than the original run
-    a = np.load(synthetic_runs.first.run_dir / "final.npy")
-    b = np.load(run.run_dir / "final.npy")
+    a = np.load(synthetic_runs.first.run_dir / "local_lucky.npy")
+    b = np.load(run.run_dir / "local_lucky.npy")
     assert not np.array_equal(a, b)

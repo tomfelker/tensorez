@@ -1,11 +1,16 @@
-# TensoRez Next — CLI ↔ GUI Contract (v0)
+# TensoRez Next — CLI ↔ GUI Contract
 
 The CLI and the GUI are independent programs. The CLI never knows a GUI exists.
 The GUI authors recipe files, spawns the CLI, and reads what the CLI leaves behind.
 Everything the GUI can do, a person with a text editor and a terminal can do identically.
 
-The three interfaces below are the entire boundary. Changes to any of them bump
-`version` fields and get noted here.
+The three interfaces below are the entire boundary: this document exists so both
+sides agree on them *today*, not to promise anything about tomorrow. **Nothing is
+kept backwards compatible for now** — recipes have no schema version, old keys
+become unknown-key errors rather than deprecations, and both sides change
+together. Breaking changes get an entry in Amendments so a stale recipe's error
+message can be looked up, and that's the whole compatibility story until the
+design settles.
 
 ---
 
@@ -24,11 +29,19 @@ stacking), `lucky_stack` (classic whole-frame lucky stacks), and `mfbd`
 computes one cached scalar score per frame and is required by `lucky_stack` and
 by `mfbd` with `frames = "lucky_top"`.
 
-```toml
-[recipe]
-version = 0
-name = "jupiter_demo"        # used in output paths; [A-Za-z0-9_-]+
+A recipe is nothing but its stages — there is no identity section and no schema
+version to declare. The recipe file *is* the run's name: `iss_pass.toml` produces
+`iss_pass/`.
 
+**Paths in a recipe — inputs and `[output] dir` alike — resolve against the
+working directory**, not the recipe's location: the ordinary shell rule. The
+GUI runs the CLI with the working directory set to the recipe's own folder, so
+the intended workflow (recipe saved beside the `.SER` files it processes) needs
+nothing but bare filenames, and its results appear right there. A recipe copied
+into a run archive therefore needs no path rewriting — it just has to be run
+from the same place.
+
+```toml
 [lights]
 # One or more paths/globs, concatenated in order. .ser (MONO / RGB / BAYER_RGGB /
 # BAYER_GRBG), or globs of stills (.png, .tif, .jpg — decoded to linear light).
@@ -47,6 +60,11 @@ paths = ["data/darks.ser"]
 start_frame = 0              # same selection keys as [lights] — carve the darks out
 frame_step = 1               # of a capture that contains them (e.g. the empty sky
 end_frame = 100              # before/after an ISS pass); end_frame exclusive
+keep_level = false           # true: subtract only the dark's *pattern*, adding its
+                             # scalar mean back, so calibrated pixels keep their
+                             # pedestal instead of scattering around zero (.tif/.png
+                             # are unsigned and clip negatives to black; .npy keeps
+                             # them). Useful when the "darks" are really sky frames.
 # Produces master dark (mean) AND per-pixel variance (fed to luckiness as noise term).
 
 [align]
@@ -68,7 +86,7 @@ max_wavelength_pixels = 50.0
 [lucky_stack]                # optional; classic lucky stacks. Requires [lucky_scoring].
 top_fractions = [0.1]        # one product per fraction f: the plain average of the
                              # best ceil(f * N) frames (min 1); 1.0 = mean of everything.
-                             # Products: stages/lucky_stack/lucky_stack_p10.{tif,png} etc.
+                             # Products: lucky_stack_p10.{npy,tif,png} etc.
                              # (label = percent, '.'->'_' : 0.05->p5, 0.125->p12_5)
 
 [local_lucky]                # optional; per-pixel lucky stacking (best for extended scenes)
@@ -79,14 +97,14 @@ isoplanatic_patch_pixels = 55.0        # spatial smoothing scale of luckiness
 channel_crosstalk = 0.0                # 0 = per-channel luck, 1 = min across channels
 stdevs_above_mean = 2.5                # sigmoid gate center, in σ of per-pixel luck
 steepness = 3.0                        # sigmoid gate sharpness
-# Product: stages/local_lucky/local_lucky.{tif,png}
+# Product: local_lucky.{npy,tif,png}
 
 [mfbd]                       # optional; multi-frame blind deconvolution (torchmfbd)
 method = "torchmfbd"         # only value in v0
 frames = "lucky_top"         # "lucky_top" (needs [lucky_scoring]) | "all"
 top_n = 12                   # count of luckiest frames…
 # top_fraction = 0.1         # …or a fraction of all frames — never both
-# Product: stages/mfbd/mfbd.{tif,png}
+# Product: mfbd.{npy,tif,png}
 diameter_cm = 27.94          # default: Celestron C11 aperture
 central_obscuration_cm = 9.5 # default: Celestron C11
 # Pixel scale — EXACTLY ONE representation per recipe file (hard error if both/neither):
@@ -106,30 +124,37 @@ lr_modes = 0.08
 apodization_border = 0       # keep 0 for planets on dark sky
 frequency_cutoff = [0.2, 0.3]  # reconstruction filter, fractions of the diffraction limit
 # Requires a square [align] crop.
-# final.* is the fanciest enabled product: mfbd, else local_lucky, else the
-# FIRST-listed lucky_stack fraction; every product also stays available under
-# its stages/<stage>/ artifacts.
 
-[output]
-dir = "output"               # runs land in <dir>/<name>/<UTC timestamp>/
+[output]                     # optional section
+# dir = "results"            # default: the recipe's filename minus its extension, in
+                             # the working directory — jupiter.toml -> jupiter/ (see §3).
+                             # Only the *products* live here; run archives and the cache
+                             # are CLI options, not recipe keys.
 debug_frames = 10            # per-frame debug artifacts kept for first N frames
 ```
 
 Unknown keys are a **hard error** (catches typos; the GUI round-trips files it
 didn't write). Omitting a key that has a default is legal — sparse recipes are
-encouraged; only the values shown as REQUIRED have no default. Relative paths in the recipe resolve against the recipe file's
-directory. The cache directory is `cache/` under the current working directory
-(override with `--cache-dir`).
+encouraged; only the values shown as REQUIRED have no default.
 
 ### CLI invocations
 
 ```
-tensorez run <recipe.toml> [--cache-dir DIR] [--pretty]
+tensorez run <recipe.toml> [--runs-dir DIR] [--cache-dir DIR] [--events]
 tensorez validate <recipe.toml>     # parse + resolve; report per-stage cache hit/miss; no work
 ```
 
-`--pretty` renders human-readable progress instead of JSONL. Exit code 0 on
-success, nonzero on error (after emitting an `error` event).
+Output is human-readable by default; `--events` switches stdout to the JSONL
+event stream of §2, which is what the GUI spawns.
+
+`--runs-dir` (default `./tensorez_runs`) and `--cache-dir` (default
+`./tensorez_cache`) say where bulk regenerable data goes, and are options
+rather than recipe keys precisely so a recipe stays portable while one machine
+can keep its archives and cache on a fast scratch disk. Like every other
+relative path they resolve against the working directory; the GUI remembers a
+setting for each.
+
+Exit code 0 on success, nonzero on error (after emitting an `error` event).
 
 ---
 
@@ -140,14 +165,14 @@ since run start, float). Unknown event types must be ignored by consumers.
 
 | event | fields | notes |
 |---|---|---|
-| `run_start` | `recipe_path`, `recipe` (resolved dict), `run_dir`, `frame_count` | first event |
+| `run_start` | `recipe_path`, `name`, `recipe` (resolved dict), `output_dir`, `run_dir`, `frame_count` | first event; `name` is the recipe's filename stem |
 | `stage_start` | `stage`, `cached` (bool) | `cached: true` ⇒ no progress events follow, `stage_end` is immediate |
 | `progress` | `stage`, `current`, `total`, `message?` | `current` counts from 1; throttled to ≤ ~10/s |
 | `artifact` | `stage`, `name`, `kind`, `path`, `width?`, `height?`, `frame?` | emitted as soon as the file is complete; path relative to `run_dir` |
 | `stage_end` | `stage`, `seconds` | |
 | `log` | `level` (`info`\|`warning`), `message` | freeform |
 | `error` | `message`, `stage?`, `traceback?` | terminal; process exits nonzero |
-| `done` | `seconds`, `final` (path of final artifact) | terminal on success |
+| `done` | `seconds`, `products` (product base names), `output_dir` | terminal on success |
 
 Artifact `kind`: `preview` (8-bit PNG, for display), `image` (16-bit TIFF,
 linear light), `array` (`.npy` float32), `sequence_frame` (per-frame debug
@@ -160,17 +185,36 @@ restartable; completed stages are served from cache on rerun.
 
 ## 3. Output layout + manifest
 
+Every producer publishes its result under a **stable name of its own** —
+`local_lucky`, `lucky_stack_p10`, `mfbd`, … — as `.npy` (exact float32),
+`.tif` (16-bit linear) and `.png` (8-bit sRGB preview). No product is
+"the" result; there is no `final.*`.
+
+Running `jupiter.toml` from the directory it lives in, with no options:
+
 ```
-<output.dir>/<recipe.name>/<YYYY-MM-DDTHH-MM-SSZ>/
-  manifest.json
-  recipe.toml              # verbatim copy of the input recipe
-  log.txt                  # the event stream, mirrored
-  final_preview.png        # 8-bit sRGB preview
-  final.tif                # 16-bit linear-light result (the deliverable)
-  final.npy                # float32, exact
-  stages/<stage>/...       # per-stage debug artifacts (luckiness maps, weights,
-                           # unweighted average, per-frame previews …)
+<cwd>/                                 # where the recipe and its .SER files live
+  jupiter.toml
+  jupiter.ser
+  jupiter/                             # <output.dir>: default <recipe name>/
+    local_lucky.npy/.tif/.png          # the products, overwritten by each run
+    mfbd.npy/.tif/.png
+  tensorez_runs/jupiter/<YYYY-MM-DDTHH-MM-SSZ>/   # --runs-dir; one dir per run, kept
+    manifest.json
+    recipe.toml                        # verbatim copy of the recipe as run
+    log.txt                            # the event stream, mirrored
+    local_lucky.npy/.tif/.png          # that run's own copy of each product
+    mfbd.npy/.tif/.png
+    examples/<stage>/...               # debug imagery (luckiness maps, weights,
+                                       # unweighted average, PSFs, per-frame previews …)
+  tensorez_cache/<stage>/...           # --cache-dir; stage cache (see below)
 ```
+
+Artifact paths are relative to the **run** directory. The output directory
+holds only the products, so "the latest result" is always one predictable
+path, while the runs directory accumulates the history — under a per-recipe
+level, so that pointing `--runs-dir` at one shared scratch disk still keeps
+each recipe's history its own.
 
 `manifest.json`:
 
@@ -178,11 +222,13 @@ restartable; completed stages are served from cache on rerun.
 {
   "manifest_version": 0,
   "recipe": { ... resolved recipe ... },
-  "run": {"started_utc": "...", "seconds": 123.4, "frame_count": 300},
+  "run": {"name": "jupiter", "started_utc": "...", "seconds": 123.4,
+          "frame_count": 300, "working_dir": "...", "output_dir": "...",
+          "products": ["local_lucky", "mfbd"]},
   "stages": [{"name": "align", "cached": false, "seconds": 5.2}, ...],
   "artifacts": [
     {"stage": "local_lucky", "name": "luckiness_mean", "kind": "preview",
-     "path": "stages/local_lucky/luckiness_mean.png", "width": 512, "height": 512},
+     "path": "examples/local_lucky/luckiness_mean.png", "width": 512, "height": 512},
     ...
   ]
 }
@@ -194,14 +240,20 @@ output to a stage must never require GUI changes.
 
 ### Caching (CLI-internal, but layout is stable for inspection)
 
-`cache/<stage>/<sha256[:16]>/` with a sibling human-readable `key.txt` holding
+`tensorez_cache/<stage>/<sha256[:16]>/` with a sibling human-readable `key.txt` holding
 the hash-info string (inputs described by path + size + mtime, plus all
 parameters that affect the stage, plus upstream stage keys). Same scheme as the
 tensorez dev branch, with file identity added to the key.
 
 ---
 
-## Amendments (v0, post-integration)
+## Amendments (post-integration)
+
+- **`[recipe]` is gone entirely (breaking)** — both its keys are: `name`
+  (the filename says it) and `version` (a schema version nobody would know
+  when to change, on a project explicitly not maintaining compatibility).
+  A recipe now starts at `[lights]`; an old one fails with
+  `unknown section [recipe]`.
 
 - `stage_start` for `local_lucky` carries `pass1_cached: bool` — that stage is never
   fully `cached` (pass 2 always runs), but pass-1 statistics may be served from cache.
@@ -210,14 +262,13 @@ tensorez dev branch, with file identity added to the key.
   `{recipe, frame_count, stages: [{stage, cached}]}` over the cacheable stages —
   `darks`, `align`, `lucky_scoring`, `local_lucky_stats` — each present only when
   the corresponding recipe section is enabled.
-- `done.final` is a path **relative to `run_dir`** (e.g. `"final.tif"`); its preview
-  is `final_preview.png` by convention.
-- `final.npy` on disk is **HWC** float32 (NCHW applies to in-memory torch tensors only).
+- Product `.npy` files on disk are **HWC** float32 (NCHW applies to in-memory
+  torch tensors only).
 - Artifact `name` is not a unique key (the same name may appear with multiple kinds);
   `(name, kind, frame)` is unique.
 - TOML integer literals are accepted anywhere a float is expected (JS serializers
   write `2.0` as `2`).
-- The `lucky_scoring` stage emits `stages/lucky_scoring/frame_scores.npy` and a
+- The `lucky_scoring` stage emits `examples/lucky_scoring/frame_scores.npy` and a
   `log` line naming the best frames; the scores themselves are cached. The `mfbd`
   stage is never `cached: true` (its output is a product); its per-iteration
   `progress` carries the current loss in `message`, and it emits `loss_history`
@@ -242,6 +293,32 @@ tensorez dev branch, with file identity added to the key.
   optional, at least one producer required); old names are unknown-section
   hard errors. `[lucky]`'s `selection` key is gone — classic top-K selection
   is now the `lucky_stack` stage.
+- **Path resolution changed (breaking).** Relative paths in a recipe now
+  resolve against the **working directory**, not the recipe file's directory.
+  The GUI spawns the CLI with the working directory set to the recipe's folder,
+  which preserves the intended workflow while making a recipe mean the same
+  thing wherever it is copied.
+- **Output layout, products, and naming (breaking).** The recipe file names the
+  run, and `[output] dir` defaults to that name in the working directory. Runs land in
+  `<runs-dir>/<recipe name>/<timestamp>/` where `--runs-dir` defaults to
+  `./tensorez_runs`, debug artifacts moved from `stages/` to
+  `examples/`, and `--cache-dir` defaults to `./tensorez_cache`. Neither is a
+  recipe key — they are machine preferences (the GUI keeps a setting for each,
+  in a JSON file in the user's profile directory). There is no
+  `final.*`: each producer writes `<product>.{npy,tif,png}` at the top of the
+  run directory, and the `output` stage copies them into `<dir>` (where each
+  run overwrites the last) while declaring no artifacts of its own. `done`
+  carries `products` + `output_dir` instead of `final`; `run_start` gained
+  `name` + `output_dir`; the manifest's `run` gained `name`, `working_dir`,
+  `output_dir` and `products`; `validate_result` gained `name`, `working_dir`,
+  `output_dir` and `runs_dir`.
+- `--pretty` is gone because human-readable output is now the default;
+  `--events` opts into the JSONL stream (the GUI passes it).
+- `[darks] keep_level` subtracts only the master dark's pattern (adding its
+  scalar mean back). Dark subtraction otherwise leaves genuinely negative
+  pixels: alignment (mean-relative) and the luckiness/scoring bands (DC-free)
+  are unaffected, `.npy` preserves them, and `.tif`/`.png` clip them to black.
+  The `align` stage logs what fraction of frame 0 went negative.
 
 ## 4. Pixel conventions
 
@@ -252,5 +329,5 @@ no auto-stretch, no gamma knobs; WYSIWYG like AstroLock Seeker.
 SER 16-bit values scale to [0, 1] by /(2^bit_depth − 1). Bayer sources are
 debayered on read per `[lights] debayer`; the superpixel modes halve width
 and height (crop sizes and all *_pixels tunings are in output pixels).
-4-channel results collapse to RGB (greens averaged) in `final.tif` and every
-preview PNG; `final.npy` keeps the exact channels.
+4-channel results collapse to RGB (greens averaged) in every product `.tif`
+and preview `.png`; the `.npy` keeps the exact channels.

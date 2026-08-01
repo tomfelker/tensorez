@@ -72,6 +72,22 @@ ipcMain.handle('dialog:chooseDirectory', async (e, opts = {}) => {
   return r.canceled ? null : r.filePaths[0];
 });
 
+// ---------- app paths ----------
+// The renderer edits recipes like a normal document app: there is always a
+// real file behind the editor (the CLI can only run a file), so an unsaved
+// recipe lives in a scratch file in the user's profile directory until they
+// Save As somewhere they care about. Settings live beside it.
+
+ipcMain.handle('app:paths', () => {
+  const userData = app.getPath('userData');
+  fs.mkdirSync(userData, { recursive: true });
+  return {
+    userData,
+    settings: path.join(userData, 'settings.json'),
+    scratchRecipe: path.join(userData, 'untitled.toml'),
+  };
+});
+
 // ---------- filesystem ----------
 
 ipcMain.handle('fs:readText', (e, p) => fsp.readFile(p, 'utf8'));
@@ -85,10 +101,16 @@ ipcMain.handle('fs:exists', async (e, p) => {
 // stdout is the JSONL event stream; lines are forwarded verbatim to the
 // renderer, which owns all parsing (so mock and real paths share code).
 
-ipcMain.handle('run:spawn', (e, { recipePath, cwd, cacheDir }) => {
+ipcMain.handle('run:spawn', (e, { recipePath, cwd, runsDir, cacheDir }) => {
   const runId = nextId++;
-  const args = ['-m', 'tensorez', 'run', recipePath];
+  // --events: the CLI's default output is human-readable; we want the JSONL
+  // event stream (the GUI is the consumer that needs it).
+  const args = ['-m', 'tensorez', 'run', recipePath, '--events'];
+  if (runsDir) args.push('--runs-dir', runsDir);
   if (cacheDir) args.push('--cache-dir', cacheDir);
+  // The CLI resolves the recipe's relative paths against its working
+  // directory; defaulting that to the recipe's own folder is what makes
+  // "recipe saved beside the .ser files" work with bare filenames.
   const child = spawn(process.env.TENSOREZ_PYTHON || 'python', args, {
     cwd: cwd || path.dirname(recipePath),
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -19,8 +19,12 @@ obd/**
 output/*
 cli/output/
 **/tensorez_cache/**
+**/tensorez_runs/**
 cache/**
 cache
+
+# example recipes write their results into a directory named after themselves
+cli/examples/*/
 **/__pycache__/*
 *.zip
 *.pdf

@@ -25,7 +25,11 @@ if not SYNTHETIC_SER.exists():
     subprocess.run([sys.executable, str(EXAMPLES / "gen_synthetic.py")], check=True)
 
 
-def run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def run_cli(args: list[str], cwd: Path, events: bool = True) -> subprocess.CompletedProcess[str]:
+    """Invoke the CLI.  Tests parse the JSONL event stream, so --events is
+    added unless a test is specifically checking the human-readable default."""
+    if events and args and args[0] in ("run", "validate") and "--events" not in args:
+        args = [*args, "--events"]
     env = dict(os.environ)
     env["PYTHONPATH"] = str(CLI_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.run(
@@ -59,10 +63,6 @@ class CliRun:
 
 def write_recipe(path: Path, out_dir: Path, stdevs_above_mean: float = 2.0) -> Path:
     path.write_text(f"""
-[recipe]
-version = 0
-name = "synthetic"
-
 [lights]
 paths = ["{SYNTHETIC_SER.as_posix()}"]
 

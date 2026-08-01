@@ -1,7 +1,14 @@
 // Run console: spawn the CLI via the bridge, consume the JSONL event stream,
 // render per-stage progress, artifacts as they land, and the raw log.
+//
+// The CLI resolves the recipe's relative paths against its working directory,
+// which defaults to the recipe's own folder — so a recipe saved beside its
+// .ser files just works, and its results land there too. Run archives and the
+// stage cache are bulk data and go wherever the settings say (default: the
+// working directory), which is how you keep them off the capture drive.
 
 import { openViewer } from './viewer.js';
+import { loadSettings, updateSettings } from './settings.js';
 
 const IMAGE_KINDS = new Set(['preview', 'sequence_frame']);
 
@@ -29,6 +36,26 @@ export function initRun(root) {
       </span>
     </div>
 
+    <details class="rawlog" id="run-dirs">
+      <summary>Where runs and cache go</summary>
+      <div class="toolbar" style="margin-top:8px">
+        <span class="dim" style="font-size:12px">run archives</span>
+        <input id="run-runs-dir" type="text" class="mono" style="width:260px"
+               placeholder="(working directory)/tensorez_runs" aria-label="runs directory">
+        <button id="run-runs-browse" class="small">Browse…</button>
+        <div class="sep"></div>
+        <span class="dim" style="font-size:12px">stage cache</span>
+        <input id="run-cache-dir" type="text" class="mono" style="width:260px"
+               placeholder="(working directory)/tensorez_cache" aria-label="cache directory">
+        <button id="run-cache-browse" class="small">Browse…</button>
+      </div>
+      <div class="field-help" style="padding:0 8px 8px">
+        Kept out of the recipe on purpose: both hold bulk regenerable data, so
+        point them at a fast scratch disk and every recipe uses it, leaving your
+        capture drive holding only recipes and results.
+      </div>
+    </details>
+
     <div class="run-status-card">
       <div id="run-dot" class="status-dot"></div>
       <div>
@@ -51,6 +78,8 @@ export function initRun(root) {
   const el = (id) => root.querySelector('#' + id);
   const recipeInput = el('run-recipe');
   const cwdInput = el('run-cwd');
+  const runsDirInput = el('run-runs-dir');
+  const cacheDirInput = el('run-cache-dir');
   const startBtn = el('run-start');
   const cancelBtn = el('run-cancel');
   const dot = el('run-dot');
@@ -224,13 +253,14 @@ export function initRun(root) {
       case 'done': {
         setStatus('done', 'Done', `finished in ${fmtSecs(ev.seconds)}`);
         doneEl.innerHTML = '';
+        const products = ev.products || [];
         const banner = document.createElement('div');
         banner.className = 'done-banner';
-        const finalUrl = window.bridge.fileUrl(runDir || '', 'final_preview.png');
         banner.innerHTML = `
           <div>
             <div class="d-title">Run complete — ${fmtSecs(ev.seconds)}</div>
-            <div class="run-meta mono">${ev.final}</div>
+            <div class="run-meta mono">${products.join(', ') || 'no products'}</div>
+            <div class="run-meta mono dim">${ev.output_dir || ''}</div>
           </div>
           <div style="flex:1"></div>`;
         const btn = document.createElement('button');
@@ -240,12 +270,18 @@ export function initRun(root) {
             detail: { view: 'results', runDir },
           }));
         });
-        const thumb = document.createElement('img');
-        thumb.src = finalUrl;
-        thumb.alt = 'final preview';
-        thumb.style.cssText = 'height:64px;border-radius:6px;background:#000;cursor:pointer';
-        thumb.addEventListener('click', () => openViewer('final_preview.png', finalUrl));
-        banner.append(thumb, btn);
+        // one thumbnail per product, each named for its stage's output
+        for (const name of products) {
+          const url = window.bridge.fileUrl(runDir || '', name + '.png');
+          const thumb = document.createElement('img');
+          thumb.src = url;
+          thumb.alt = name;
+          thumb.title = name;
+          thumb.style.cssText = 'height:64px;border-radius:6px;background:#000;cursor:pointer';
+          thumb.addEventListener('click', () => openViewer(name + '.png', url));
+          banner.appendChild(thumb);
+        }
+        banner.appendChild(btn);
         doneEl.appendChild(banner);
         break;
       }
@@ -298,8 +334,29 @@ export function initRun(root) {
     activeRunId = await window.bridge.spawnRun({
       recipePath,
       cwd: cwdInput.value.trim() || undefined,
+      runsDir: runsDirInput.value.trim() || undefined,
+      cacheDir: cacheDirInput.value.trim() || undefined,
     });
   }
+
+  // ---------- runs/cache preferences ----------
+
+  for (const [input, key, title] of [
+    [runsDirInput, 'runsDir', 'Choose where run archives go'],
+    [cacheDirInput, 'cacheDir', 'Choose where the stage cache goes'],
+  ]) {
+    input.addEventListener('change', () => updateSettings({ [key]: input.value.trim() }));
+    const browse = el(input.id.replace('-dir', '-browse'));
+    browse.addEventListener('click', async () => {
+      const p = await window.bridge.chooseDirectory({ title, defaultPath: input.value.trim() });
+      if (p) { input.value = p; await updateSettings({ [key]: p }); }
+    });
+  }
+
+  loadSettings().then(({ values }) => {
+    runsDirInput.value = values.runsDir || '';
+    cacheDirInput.value = values.cacheDir || '';
+  });
 
   startBtn.addEventListener('click', start);
   cancelBtn.addEventListener('click', () => {
@@ -319,6 +376,11 @@ export function initRun(root) {
       if (!recipeInput.value && window.__tensorez?.recipePath?.()) {
         recipeInput.value = window.__tensorez.recipePath();
       }
+    },
+    // the recipe view's Run button: it has already saved the file
+    receive(detail) {
+      if (detail.recipePath) recipeInput.value = detail.recipePath;
+      if (detail.autostart && activeRunId == null) start();
     },
   };
 }

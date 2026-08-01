@@ -16,9 +16,10 @@ Unit conversions (torchmfbd is solar-heritage and uses CGS-ish units):
 * wavelength: **Angstrom** (ours: nm, x10)
 * pixel scale: **arcsec/pixel** (passed through)
 
-torchmfbd requires the pixel scale to oversample the diffraction limit:
-``psf_scale = 206265 * lambda / (D * pix) >= 1``; below ~2 the data is
-undersampled (coarser than Nyquist) and we emit a warning.
+torchmfbd requires the pixel scale to resolve the diffraction limit:
+``psf_scale = 206265 * lambda / (D * pix) >= 1`` is a hard requirement (see
+``check_optics``); below ~2 the data is merely undersampled — coarser than
+Nyquist — and we emit a warning.
 
 Practical adaptations for planetary (non-solar) targets, found empirically:
 
@@ -30,8 +31,9 @@ Practical adaptations for planetary (non-solar) targets, found empirically:
   a conservative (0.2, 0.3) of the diffraction limit — amateur planetary
   data rarely holds signal beyond that, and higher cutoffs ring hard.
 
-Frames are normalized per-frame by their spatial mean before the solve
-(torchmfbd convention) and the object is rescaled back to linear light.
+Frames are normalized by one scale per channel (the mean over all of them)
+before the solve, and the object is rescaled back to linear light — see
+``run_torchmfbd`` for why this departs from torchmfbd's per-frame convention.
 
 Implementation note: torchmfbd tracks its per-iteration loss only in a tqdm
 progress bar (its ``self.loss`` attribute is never filled), so we substitute
@@ -80,30 +82,44 @@ def apply_superpixel_scale(cfg: MfbdConfig, is_bayer: bool, debayer: str) -> Mfb
 
 
 def check_optics(cfg: MfbdConfig, channels: int, log: LogCallback) -> None:
-    """Validate the physical setup; raises ValueError only on config mistakes.
+    """Validate the physical setup; raises ValueError on unusable geometry.
 
-    Undersampling is warned about, not fatal: seeing-blurred data can still
-    benefit from deconvolution, it just cannot recover detail finer than the
-    pixels — the user may knowingly accept that.
+    Sampling below Nyquist is only warned about: deconvolving seeing-blurred,
+    coarsely-sampled data is a legitimate knowingly-degraded choice.
+
+    But one pixel coarser than lambda/D is a hard floor, not a judgement call —
+    torchmfbd pads its pupil by the overfill factor and cannot build a basis at
+    all below 1.0.  It does check (deconvolution.py, define_basis), except its
+    error message references a ``self.telescope_diameter`` that doesn't exist,
+    so raising it dies with an unrelated AttributeError.  We get there first
+    and say what to change.
     """
     if len(cfg.wavelengths_nm) != channels:
         raise ValueError(
             f"[mfbd] wavelengths_nm has {len(cfg.wavelengths_nm)} entries but the "
             f"image has {channels} channel(s) — provide one wavelength per channel"
         )
-    for w in cfg.wavelengths_nm:
+
+    # lambda/D per wavelength: the finest detail the aperture can form, and so
+    # the coarsest pixel torchmfbd will accept.  The shortest wavelength binds.
+    limits = {w: 206265.0 * w * 1e-7 / cfg.diameter_cm for w in cfg.wavelengths_nm}
+    ceiling = min(limits.values())
+    if cfg.pixel_scale_arcsec > ceiling:
+        worst = min(w for w, limit in limits.items() if cfg.pixel_scale_arcsec > limit)
+        raise ValueError(
+            f"[mfbd] pixel scale {cfg.pixel_scale_arcsec:.4g} arcsec/pixel is coarser than "
+            f"the {cfg.diameter_cm:g} cm aperture's own resolution at {worst:g} nm "
+            f"(lambda/D = {limits[worst]:.4g} arcsec), so a pixel is larger than anything "
+            f"the telescope can resolve and there is no wavefront left to fit — torchmfbd "
+            f"cannot build a pupil basis. It needs below {ceiling:.4g} arcsec/pixel: add a "
+            f"barlow, use debayer = \"bilinear\" rather than a superpixel mode (which "
+            f"doubles the effective scale), or check that [mfbd]'s pixel size, focal "
+            f"length and aperture actually describe this capture"
+        )
+
+    for w, diffraction_arcsec in limits.items():
         overfill = overfill_factor(w, cfg.diameter_cm, cfg.pixel_scale_arcsec)
-        diffraction_arcsec = 206265.0 * w * 1e-7 / cfg.diameter_cm
-        if overfill < 1.0:
-            log(
-                f"mfbd: {w} nm is SEVERELY undersampled at {cfg.pixel_scale_arcsec}\"/pix "
-                f"(lambda/D = {diffraction_arcsec:.3f}\" is smaller than one pixel) — the "
-                f"PSF model cannot represent the aperture's full resolution; results may "
-                f"be unreliable. A barlow (or debayer = \"bilinear\" instead of superpixel) "
-                f"would help",
-                "warning",
-            )
-        elif overfill < 2.0:
+        if overfill < 2.0:
             log(
                 f"mfbd: {w} nm is undersampled at {cfg.pixel_scale_arcsec}\"/pix "
                 f"(lambda/D = {diffraction_arcsec:.3f}\" spans only {overfill:.2f} px; "
@@ -219,14 +235,35 @@ def run_torchmfbd(
             decon = tmfbd_deconvolution.Deconvolution(_build_config(cfg, n_pixel=h))
             decon.logger.disabled = True
 
-            # Per-frame normalization by spatial mean (torchmfbd convention);
-            # remember the scale to restore linear light afterwards.
+            # Normalize each channel by ONE scale — its mean over every frame —
+            # and remember it to restore linear light afterwards.
+            #
+            # torchmfbd's own convention is to divide each frame by its own
+            # spatial mean, which is fine for solar data but treacherous here:
+            # after dark subtraction a planet-on-black-sky frame's mean is a
+            # small residual, so per-frame normalization divides by a noisy
+            # near-zero number.  That injects frame-to-frame gain scatter which
+            # the solver can only explain through the wavefront — and if the
+            # mean ever crosses zero the frame explodes.  A common scale is
+            # stable and keeps real brightness variation between frames.
             scales = []
             for c in range(channels):
                 fr = frames_nchw[:, c].unsqueeze(0)  # (1, N, H, W)
-                mean = fr.mean(dim=(-1, -2), keepdim=True).clamp(min=1e-12)
-                scales.append(float(mean.mean()))
-                decon.add_frames(fr / mean, id_object=c)
+                scale = float(fr.mean())
+                if not scale > 0:
+                    raise ValueError(
+                        f"[mfbd] channel {c} has a mean of {scale:.4g} after calibration — "
+                        f"there is no signal left to deconvolve. Over-subtracted darks are "
+                        f"the usual cause; try [darks] keep_level = true"
+                    )
+                scales.append(scale)
+                decon.add_frames(fr / scale, id_object=c)
+
+            negative = float((frames_nchw < 0).float().mean()) * 100.0
+            if negative > 1.0:
+                log(f"mfbd: {negative:.0f}% of the input samples are negative (dark-subtracted "
+                    f"sky); the reconstruction handles them, but its object estimate can go "
+                    f"negative too", "info")
 
             decon.deconvolve(
                 infer_object=False,

@@ -13,6 +13,11 @@
 //   saveFileDialog({title?, filters?, defaultPath?})   -> Promise<string|null>
 //   chooseDirectory({title?, defaultPath?})            -> Promise<string|null>
 //
+// App paths (where the renderer keeps its own state):
+//   appPaths() -> Promise<{userData, settings, scratchRecipe}>
+//     settings:      JSON file of GUI preferences (last opened recipe, …)
+//     scratchRecipe: the file backing an "unsaved" recipe, so it can be run
+//
 // Filesystem:
 //   readTextFile(path)         -> Promise<string>       (rejects if missing)
 //   writeTextFile(path, text)  -> Promise<void>
@@ -21,7 +26,10 @@
 //                                 converts to a URL the renderer can load.
 //
 // CLI runs (JSONL event stream per CONTRACT.md §2):
-//   spawnRun({recipePath, cwd?, cacheDir?}) -> Promise<runId>
+//   spawnRun({recipePath, cwd?, runsDir?, cacheDir?}) -> Promise<runId>
+//     cwd defaults to the recipe's directory — the CLI resolves the recipe's
+//     relative paths against it. runsDir/cacheDir default to the CLI's own
+//     (tensorez_runs/ and tensorez_cache/ in that working directory).
 //   killRun(runId)                          -> Promise<boolean>
 //   onRunLine(cb)    cb({runId, line})   one raw stdout line (JSONL) at a time
 //   onRunStderr(cb)  cb({runId, line})
@@ -49,6 +57,8 @@ contextBridge.exposeInMainWorld('bridge', {
   openFileDialog: (opts) => ipcRenderer.invoke('dialog:openFile', opts),
   saveFileDialog: (opts) => ipcRenderer.invoke('dialog:saveFile', opts),
   chooseDirectory: (opts) => ipcRenderer.invoke('dialog:chooseDirectory', opts),
+
+  appPaths: () => ipcRenderer.invoke('app:paths'),
 
   readTextFile: (p) => ipcRenderer.invoke('fs:readText', p),
   writeTextFile: (p, text) => ipcRenderer.invoke('fs:writeText', p, text),

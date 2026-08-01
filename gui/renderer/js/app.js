@@ -17,8 +17,10 @@ async function boot() {
     import('./ser.js'),
   ]);
 
+  // initRecipe is async: it adopts the last-opened (or scratch) recipe from
+  // the profile directory before we declare the app ready.
   const views = {
-    recipe: initRecipe(document.getElementById('view-recipe')),
+    recipe: await initRecipe(document.getElementById('view-recipe')),
     run: initRun(document.getElementById('view-run')),
     results: initResults(document.getElementById('view-results')),
     ser: initSer(document.getElementById('view-ser')),

@@ -3,10 +3,7 @@
 # removing the constant atmospheric-dispersion offset between R, G and B.
 # The integer shifts dither frame to frame, and the deconvolution's
 # per-channel tip/tilt modes absorb the sub-pixel residual.
-
-[recipe]
-version = 0
-name = "jupiter_best_dispersion"
+# Run from this directory: cd cli/examples && python -m tensorez run jupiter_best_dispersion.toml
 
 [lights]
 paths = ["../../data/jupiter_mvi_6906/????????.png"]
@@ -39,5 +36,4 @@ pixel_size_um = 4.3
 wavelengths_nm = [700.0, 530.0, 470.0]
 
 [output]
-dir = "../output"
 debug_frames = 0

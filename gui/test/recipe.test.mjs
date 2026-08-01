@@ -8,13 +8,22 @@ export default async function run(browser) {
   await page.waitForSelector('#rc-form .section-card');
 
   const toml = page.locator('#rc-toml');
+  const pathEl = page.locator('#rc-path');
+
+  // ---- a fresh app starts on the scratch recipe, already backed by a file ----
+  assert.equal(await pathEl.textContent(), 'untitled');
+  assert.equal(await pathEl.getAttribute('data-path'), '/appdata/untitled.toml');
+  assert.match(await page.evaluate(() => window.bridge.readTextFile('/appdata/untitled.toml')),
+    /^\[lights\]/, 'scratch recipe written on first boot');
+
+  // ---- the raw TOML is an escape hatch, not the interface: collapsed ----
+  assert.equal(await page.locator('#rc-toml-details').getAttribute('open'), null,
+    'raw TOML starts collapsed');
+  assert.ok(await toml.isHidden(), 'raw TOML hidden until asked for');
+  await page.click('#rc-toml-details summary');
+  assert.ok(await toml.isVisible());
 
   // ---- form -> toml ----
-  const nameInput = page.locator('[data-field="recipe.name"] input[type=text]');
-  await nameInput.fill('jupiter_night1');
-  await nameInput.press('Tab');
-  assert.match(await toml.inputValue(), /name = "jupiter_night1"/);
-
   // log stepper: 35 * sqrt(2) -> 49.5 (3 significant digits)
   const cross = page.locator('[data-field="local_lucky.crossover_wavelength_pixels"]');
   await cross.locator('button[title="multiply by √2"]').click();
@@ -66,12 +75,10 @@ export default async function run(browser) {
 
   // ---- toml -> form ----
   const newToml = (await toml.inputValue())
-    .replace('name = "jupiter_night1"', 'name = "saturn_take2"')
     .replace('steepness = 3', 'steepness = 7.5')
     .replace('center_of_mass = true', 'center_of_mass = false');
   await toml.fill(newToml);
   await page.waitForTimeout(500); // debounce
-  assert.equal(await nameInput.inputValue(), 'saturn_take2');
   assert.equal(
     await page.locator('[data-field="local_lucky.steepness"] .stepper input').inputValue(), '7.5');
   assert.equal(
@@ -84,7 +91,9 @@ export default async function run(browser) {
   await page.waitForTimeout(500);
   assert.ok(await page.locator('#rc-toml-error.show').isVisible(), 'parse error should show');
   assert.match(await page.locator('#rc-toml-error').textContent(), /form not updated/);
-  assert.equal(await nameInput.inputValue(), 'saturn_take2', 'form must not be clobbered');
+  assert.equal(
+    await page.locator('[data-field="local_lucky.steepness"] .stepper input').inputValue(),
+    '7.5', 'form must not be clobbered');
   await shoot(page, '03-toml-error.png');
 
   // ---- unknown key (contract hard error) also rejected ----
@@ -101,23 +110,50 @@ export default async function run(browser) {
   page.once('dialog', (d) => d.accept('/examples/jupiter_demo.toml'));
   await page.click('#rc-open');
   await page.waitForFunction(() =>
-    document.querySelector('#rc-path').textContent === '/examples/jupiter_demo.toml');
-  assert.match(await toml.inputValue(), /name = "jupiter_demo"/);
-  assert.equal(await nameInput.inputValue(), 'jupiter_demo');
+    document.querySelector('#rc-path').dataset.path === '/examples/jupiter_demo.toml');
+  assert.equal(await pathEl.textContent(), 'jupiter_demo.toml', 'shows the file name');
   assert.equal(
     await page.locator('[data-field="local_lucky.isoplanatic_patch_pixels"] .stepper input')
       .inputValue(), '55');
+  // the opened file is remembered for next launch
+  const settings = JSON.parse(await page.evaluate(() =>
+    window.bridge.readTextFile('/appdata/settings.json')));
+  assert.equal(settings.lastRecipePath, '/examples/jupiter_demo.toml');
 
-  // ---- Save (already has a path; mock write goes to memory fs) ----
+  // ---- editing marks unsaved; Save writes to the remembered path ----
+  const dbg2 = page.locator('[data-field="output.debug_frames"]');
+  await dbg2.locator('button[title=increment]').click();
+  assert.equal(await pathEl.textContent(), 'jupiter_demo.toml •', 'unsaved marker');
   await page.click('#rc-save');
+  await page.waitForFunction(() =>
+    document.querySelector('#rc-path').textContent === 'jupiter_demo.toml');
   const saved = await page.evaluate(async () =>
     window.bridge.readTextFile('/examples/jupiter_demo.toml'));
-  assert.match(saved, /name = "jupiter_demo"/);
+  assert.match(saved, /debug_frames = 11/);
 
-  // ---- New resets ----
+  // ---- Save As relocates the document ----
+  page.once('dialog', (d) => d.accept('/captures/iss_pass.toml'));
+  await page.click('#rc-saveas');
+  await page.waitForFunction(() =>
+    document.querySelector('#rc-path').dataset.path === '/captures/iss_pass.toml');
+  assert.match(await page.evaluate(() => window.bridge.readTextFile('/captures/iss_pass.toml')),
+    /debug_frames = 11/);
+
+  // ---- New goes back to the scratch file, which is written immediately ----
   await page.click('#rc-new');
-  assert.match(await toml.inputValue(), /name = "my_run"/);
-  assert.equal(await page.locator('#rc-path').textContent(), 'unsaved recipe');
+  assert.equal(await pathEl.textContent(), 'untitled');
+  assert.equal(await pathEl.getAttribute('data-path'), '/appdata/untitled.toml');
+  assert.match(await page.evaluate(() => window.bridge.readTextFile('/appdata/untitled.toml')),
+    /\[local_lucky\]/);
+  assert.doesNotMatch(await toml.inputValue(), /^name = /m, '[recipe] has no name key');
+
+  // ---- Run saves and hands the path to the run console ----
+  await page.click('#rc-run');
+  await page.waitForFunction(() =>
+    document.querySelector('#run-recipe')?.value === '/appdata/untitled.toml');
+  assert.ok(await page.locator('#view-run').isVisible(), 'Run switches to the run view');
+  await page.click('#run-cancel');
+  await page.click('.nav-btn[data-view=recipe]');
 
   // ---- align.per_channel + constraint hints ----
   const pcRow = page.locator('[data-field="align.per_channel"]');

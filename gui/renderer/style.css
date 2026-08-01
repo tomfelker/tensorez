@@ -159,14 +159,15 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 
 /* ---------- recipe editor ---------- */
 
-.recipe-layout {
-  display: grid;
-  grid-template-columns: minmax(430px, 1fr) minmax(360px, 560px);
-  gap: 24px;
-  align-items: start;
+/* One column, always: the cards are the pipeline in order, so reading down
+   them is reading the flow of the data. Columns would break that ordering.
+   Capped instead of stretched — nothing here gets better past ~900px. */
+.recipe-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 900px;
 }
-
-.recipe-form { display: flex; flex-direction: column; gap: 18px; }
 
 .section-card {
   background: var(--panel);
@@ -245,19 +246,34 @@ input.bad-input { border-color: var(--bad); }
 
 .pair-input input { width: 78px; }
 
-/* toml pane */
+/* raw toml: collapsed at the bottom — the form is the interface, this is the
+   escape hatch (and the honest statement of what gets saved) */
+.toml-details {
+  margin-top: 22px;
+  max-width: 900px;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.toml-details > summary {
+  cursor: pointer;
+  padding: 12px 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+  user-select: none;
+}
+.toml-details[open] > summary { border-bottom: 1px solid var(--border-soft); }
 .toml-pane {
-  position: sticky;
-  top: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 14px 20px 18px;
 }
 .toml-pane textarea {
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
-  min-height: 560px;
+  min-height: 420px;
   resize: vertical;
   white-space: pre;
   tab-size: 4;
@@ -265,6 +281,8 @@ input.bad-input { border-color: var(--bad); }
 .toml-pane textarea.toml-bad { border-color: var(--bad); }
 .toml-error {
   display: none;
+  margin-bottom: 16px;
+  max-width: 900px;
   background: var(--bad-soft);
   border: 1px solid rgba(240,106,106,0.35);
   color: var(--bad);
@@ -275,7 +293,6 @@ input.bad-input { border-color: var(--bad); }
   white-space: pre-wrap;
 }
 .toml-error.show { display: block; }
-.pane-title { font-size: 12px; color: var(--text-faint); letter-spacing: 1px; text-transform: uppercase; }
 
 /* ---------- run console ---------- */
 

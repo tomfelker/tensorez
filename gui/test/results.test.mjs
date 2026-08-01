@@ -14,18 +14,20 @@ export default async function run(browser) {
   // summary card
   const summary = await page.locator('.results-summary').textContent();
   assert.match(summary, /jupiter_demo/);
+  assert.match(summary, /local_lucky, lucky_stack_p10, mfbd/); // the products list
   assert.match(summary, /300/);
   assert.match(summary, /89\.4 s/);
 
   // groups in pipeline order with artifacts
   const groups = await page.locator('.stage-group h3').allTextContents();
+  // the output stage copies products out; it declares no artifacts of its own
   assert.deepEqual(groups.map((g) => g.trim().match(/^[a-z_]+/)[0]),
-    ['align', 'lucky_scoring', 'local_lucky', 'lucky_stack', 'mfbd', 'output']);
+    ['align', 'lucky_scoring', 'local_lucky', 'lucky_stack', 'mfbd']);
 
   const imgs = await page.locator('.artifact-thumb img').count();
-  assert.equal(imgs, 14, `expected 14 image artifacts, got ${imgs}`);
+  assert.equal(imgs, 13, `expected 13 image artifacts, got ${imgs}`);
   const chips = await page.locator('.artifact-chip').count();
-  assert.equal(chips, 8, `expected 8 non-image artifact chips, got ${chips}`);
+  assert.equal(chips, 9, `expected 9 non-image artifact chips, got ${chips}`);
 
   // all thumbnails actually load (no broken images)
   await page.waitForFunction(() => {
@@ -39,7 +41,7 @@ export default async function run(browser) {
   await shoot(page, '07-results-gallery.png');
 
   // ---- full-size viewer with pow2 zoom + pan ----
-  await page.locator('.artifact-thumb', { hasText: 'final_preview' }).click();
+  await page.locator('.artifact-thumb', { hasText: 'mfbd' }).last().click();
   await page.waitForSelector('#lightbox:not([hidden]) img');
   await page.waitForFunction(() => {
     const img = document.querySelector('#lightbox img');

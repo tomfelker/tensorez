@@ -41,18 +41,16 @@ def _make_data(tmp_path: Path) -> tuple[Path, Path]:
     return lights_path, darks_path
 
 
-def test_darks_subtracted_and_cached(tmp_path: Path) -> None:
-    lights_path, darks_path = _make_data(tmp_path)
-    recipe = tmp_path / "r.toml"
+def _write_recipe(tmp_path: Path, lights_path: Path, darks_path: Path,
+                  name: str = "r", extra: str = "") -> Path:
+    recipe = tmp_path / f"{name}.toml"
     recipe.write_text(f"""
-[recipe]
-version = 0
-name = "darks"
 [lights]
 paths = ["{lights_path.as_posix()}"]
 [darks]
 paths = ["{darks_path.as_posix()}"]
 start_frame = 4
+{extra}
 [local_lucky]
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 6.0
@@ -61,6 +59,12 @@ isoplanatic_patch_pixels = 10.0
 dir = "{(tmp_path / 'out').as_posix()}"
 debug_frames = 0
 """)
+    return recipe
+
+
+def test_darks_subtracted_and_cached(tmp_path: Path) -> None:
+    lights_path, darks_path = _make_data(tmp_path)
+    recipe = _write_recipe(tmp_path, lights_path, darks_path)
 
     proc = run_cli(["run", str(recipe)], cwd=tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -71,9 +75,9 @@ debug_frames = 0
     assert darks_start["cached"] is False
 
     # the hot background is gone: corner pixels near zero, blob preserved
-    final = np.load(first.run_dir / "final.npy")
-    assert abs(float(final[:4, :4].mean())) < 0.02
-    assert float(final.max()) > 0.4
+    result = np.load(first.run_dir / "local_lucky.npy")
+    assert abs(float(result[:4, :4].mean())) < 0.02
+    assert float(result.max()) > 0.4
 
     # second run serves the master dark from cache with immediate stage_end
     proc2 = run_cli(["run", str(recipe)], cwd=tmp_path)
@@ -82,3 +86,30 @@ debug_frames = 0
     darks_start2 = [e for e in second.events_of("stage_start") if e["stage"] == "darks"][0]
     assert darks_start2["cached"] is True
     assert not [e for e in second.events_of("progress") if e["stage"] == "darks"]
+
+
+def test_keep_level_leaves_the_pedestal(tmp_path: Path) -> None:
+    """keep_level removes the dark's *pattern* but not its level, so the
+    calibrated background sits near the dark's mean instead of near zero."""
+    lights_path, darks_path = _make_data(tmp_path)
+    plain = _write_recipe(tmp_path, lights_path, darks_path, name="plain")
+    kept = _write_recipe(tmp_path, lights_path, darks_path, name="kept",
+                         extra="keep_level = true")
+
+    runs = []
+    for recipe in (plain, kept):
+        proc = run_cli(["run", str(recipe)], cwd=tmp_path)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        runs.append(CliRun(proc, parse_events(proc.stdout), 0.0))
+
+    background = [float(np.load(r.run_dir / "local_lucky.npy")[:4, :4].mean()) for r in runs]
+    assert abs(background[0]) < 0.02, background          # subtracted away
+    assert abs(background[1] - 0.10) < 0.02, background   # the 0.10 offset survives
+
+    # the two differ only by that constant: same pattern removed either way
+    a = np.load(runs[0].run_dir / "local_lucky.npy")
+    b = np.load(runs[1].run_dir / "local_lucky.npy")
+    assert np.allclose(b - a, float((b - a).mean()), atol=0.02)
+
+    # ...and the level shift is reported, not silent
+    assert any("keep_level" in e["message"] for e in runs[1].events_of("log"))

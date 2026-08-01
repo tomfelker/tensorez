@@ -10,10 +10,6 @@ from conftest import SYNTHETIC_SER, parse_events, run_cli
 from tensorez.recipe import RecipeError, load_recipe
 
 MINIMAL = f"""
-[recipe]
-version = 0
-name = "t"
-
 [lights]
 paths = ["{SYNTHETIC_SER.as_posix()}"]
 
@@ -27,9 +23,13 @@ def _load(tmp_path: Path, text: str):
     return load_recipe(p)
 
 
-def test_minimal_recipe_defaults(tmp_path: Path) -> None:
+def test_minimal_recipe_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     r = _load(tmp_path, MINIMAL)
-    assert r.name == "t"
+    # the recipe file names the run, and the output directory it produces —
+    # which lands in the working directory, like every other relative path
+    assert r.name == "r"
+    assert r.output_dir == tmp_path / "r"
     assert r.lights.debayer == "bilinear"
     assert r.align.center_of_mass is True
     assert r.align.crop is None
@@ -86,19 +86,37 @@ def test_wrong_types_are_errors(tmp_path: Path) -> None:
         _load(tmp_path, MINIMAL + "\n[align]\ncrop = [512]\n")
     with pytest.raises(RecipeError, match=r"\[local_lucky\] steepness"):
         _load(tmp_path, MINIMAL + "steepness = \"sharp\"\n")
-    with pytest.raises(RecipeError, match="only version 0"):
-        _load(tmp_path, MINIMAL.replace("version = 0", "version = 1"))
     with pytest.raises(RecipeError, match=r"\[lights\] debayer"):
         _load(tmp_path, MINIMAL.replace('paths = ', 'debayer = "vng"\npaths = '))
-    with pytest.raises(RecipeError, match="must match"):
-        _load(tmp_path, MINIMAL.replace('name = "t"', 'name = "bad name!"'))
+    # the whole [recipe] section is gone: the filename names the run, and
+    # there is no schema version to declare
+    with pytest.raises(RecipeError, match=r"unknown section \[recipe\]"):
+        _load(tmp_path, "[recipe]\nversion = 0\n" + MINIMAL)
 
 
-def test_relative_paths_resolve_against_recipe_dir(tmp_path: Path) -> None:
+def test_output_dir_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    r = _load(tmp_path, MINIMAL + '\n[output]\ndir = "results"\n')
+    assert r.output_dir == tmp_path / "results"
+
+
+def test_relative_paths_resolve_against_working_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not against the recipe's own directory — the shell rule, so that what a
+    path means doesn't change when a recipe is copied into a run archive."""
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "x.ser").write_bytes(b"")
-    r = _load(tmp_path, MINIMAL.replace(SYNTHETIC_SER.as_posix(), "data/x.ser"))
+    (tmp_path / "elsewhere").mkdir()
+    text = MINIMAL.replace(SYNTHETIC_SER.as_posix(), "data/x.ser")
+
+    monkeypatch.chdir(tmp_path)
+    r = _load(tmp_path / "elsewhere", text)   # recipe over there, cwd here
     assert r.lights.paths[0] == str(tmp_path / "data" / "x.ser")
+
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    r = _load(tmp_path / "elsewhere", text)   # same recipe, different cwd
+    assert r.lights.paths[0] == str(tmp_path / "elsewhere" / "data" / "x.ser")
 
 
 def test_cli_unknown_key_emits_error_event(tmp_path: Path) -> None:

@@ -10,8 +10,9 @@ import { latestRun, expectations } from './real.test.mjs';
 const MFBD_RECIPE = `${REPO}/cli/examples/jupiter_mfbd.toml`;
 
 export default async function run(browser) {
-  const MFBD_RUN = latestRun(`${REPO}/cli/output/jupiter_mfbd`);
-  assert.ok(MFBD_RUN, 'no completed jupiter_mfbd run found — run the CLI first');
+  const MFBD_RUN = latestRun(`${REPO}/cli/examples/tensorez_runs/jupiter_mfbd`);
+  assert.ok(MFBD_RUN, 'no completed jupiter_mfbd run found — from cli/examples, run: ' +
+    'python -m tensorez run jupiter_mfbd.toml');
   const exp = expectations(MFBD_RUN);
 
   const page = await newPage(browser);
@@ -21,7 +22,7 @@ export default async function run(browser) {
   page.once('dialog', (d) => d.accept(MFBD_RECIPE));
   await page.click('#rc-open');
   await page.waitForFunction((p) =>
-    document.querySelector('#rc-path').textContent === p, MFBD_RECIPE);
+    document.querySelector('#rc-path').dataset.path === p, MFBD_RECIPE);
 
   // deconv section is enabled and populated
   assert.ok(await page.locator('input[data-section-toggle=mfbd]').isChecked(),
@@ -139,8 +140,9 @@ export default async function run(browser) {
   await page.waitForSelector('#view-results .stage-group');
 
   const groups = await page.locator('#view-results .stage-group h3').allTextContents();
+  // the output stage only copies products out; it declares no artifacts
   assert.deepEqual(groups.map((g) => g.trim().match(/^[a-z_]+/)[0]),
-    ['lucky_scoring', 'lucky_stack', 'mfbd', 'output']);
+    ['lucky_scoring', 'lucky_stack', 'mfbd']);
 
   await page.waitForFunction(() => {
     const imgs = [...document.querySelectorAll('#view-results .artifact-thumb img')];

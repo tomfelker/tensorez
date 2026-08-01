@@ -1,6 +1,9 @@
 // Recipe schema, derived from CONTRACT.md §1. The form in recipe.js is
 // generated entirely from this table.
 //
+// A recipe is just its stages: no identity section, no schema version. The
+// file's name is the run's name, and its location decides where results land.
+//
 // Field types:
 //   string | int | float | bool | enum | int_enum | paths (list of path strings)
 //   path (single path) | int2 / float2 (pairs, e.g. crop / frequency_cutoff)
@@ -22,16 +25,6 @@
 
 export const SCHEMA = [
   {
-    section: 'recipe',
-    label: 'Recipe',
-    help: 'Identity of this processing run.',
-    fields: [
-      { key: 'version', type: 'int', default: 0, readonly: true, help: 'contract version' },
-      { key: 'name', type: 'string', default: 'my_run', pattern: '^[A-Za-z0-9_-]+$',
-        help: 'used in output paths; letters, digits, _ and - only' },
-    ],
-  },
-  {
     section: 'lights',
     label: 'Lights',
     help: 'Input frames: .ser video or globs of stills, concatenated in order.',
@@ -46,7 +39,7 @@ export const SCHEMA = [
         options: ['bilinear', 'superpixel_rgb', 'superpixel_rggb', 'none'], default: 'bilinear',
         help: 'Bayer sources only (ignored otherwise). bilinear: full-size, missing colors ' +
           'interpolated. superpixel_*: half-size, real photosites only (rggb keeps both ' +
-          'greens as 4 channels — [deconv] then needs 4 wavelengths). none: treat the ' +
+          'greens as 4 channels — [mfbd] then needs 4 wavelengths). none: treat the ' +
           'mosaic as mono (IR-filtered captures)' },
     ],
   },
@@ -64,6 +57,10 @@ export const SCHEMA = [
       { key: 'frame_step', type: 'int', optional: true, default: 1, min: 1 },
       { key: 'end_frame', type: 'int', optional: true, default: 300, min: 1,
         help: 'exclusive; leave unset to use all frames' },
+      { key: 'keep_level', type: 'bool', default: false,
+        help: 'subtract the dark’s pattern but not its level, so calibrated pixels ' +
+          'keep their pedestal instead of scattering around zero (.tif/.png clip ' +
+          'negatives to black). For when the “darks” are really sky frames' },
     ],
   },
   {
@@ -85,7 +82,7 @@ export const SCHEMA = [
           '(requires center_of_mass)',
         conflictIf: (s) => s.center_of_mass === false ? 'requires center_of_mass' : null },
       { key: 'crop', type: 'int2', optional: true, default: [512, 512], labels: ['w', 'h'],
-        min: 2, help: 'centered after alignment; unset = full frame. [deconv] needs a square crop' },
+        min: 2, help: 'centered after alignment; unset = full frame. [mfbd] needs a square crop' },
       { key: 'crop_align', type: 'int', default: 2, min: 1,
         help: 'crop size/offset rounded to multiple of this' },
       { key: 'crop_offsets', type: 'int2', default: [0, 0], labels: ['x', 'y'],
@@ -120,8 +117,8 @@ export const SCHEMA = [
       'one product per fraction. Requires Lucky scoring.',
     fields: [
       { key: 'top_fractions', type: 'floatlist', default: [0.1],
-        help: 'fractions in (0, 1]; 1.0 = mean of everything. First listed becomes ' +
-          'final.* when no fancier producer is enabled' },
+        help: 'fractions in (0, 1]; 1.0 = mean of everything. Each produces its own ' +
+          'lucky_stack_p<percent>.{npy,tif,png}' },
     ],
   },
   {
@@ -130,7 +127,7 @@ export const SCHEMA = [
     optionalSection: true,
     defaultOn: true,
     help: 'Per-pixel lucky stacking (frequency-band luckiness) — great for extended ' +
-      'scenes like the Moon. Becomes final.* unless MFBD is enabled.',
+      'scenes like the Moon. Produces local_lucky.{npy,tif,png}.',
     fields: [
       { key: 'algorithm', type: 'enum', options: ['frequency_bands'], default: 'frequency_bands' },
       { key: 'noise_wavelength_pixels', type: 'float', default: 2.0, min: 0.5, max: 64,
@@ -152,7 +149,7 @@ export const SCHEMA = [
     label: 'MFBD',
     optionalSection: true,
     help: 'Optional multi-frame blind deconvolution (torchmfbd) of the luckiest ' +
-      'frames. Requires a square [align] crop. When enabled, its product is final.*',
+      'frames. Requires a square [align] crop. Produces mfbd.{npy,tif,png}.',
     validate: (s) => {
       const problems = [];
       if ('pixel_scale_arcsec' in s && 'pixel_size_um' in s) {
@@ -219,9 +216,14 @@ export const SCHEMA = [
   {
     section: 'output',
     label: 'Output',
-    help: 'Runs land in <dir>/<name>/<UTC timestamp>/.',
+    help: 'Each producer writes <name>.npy/.tif/.png into the output directory, ' +
+      'overwritten every run; past runs are archived under tensorez_runs/<UTC ' +
+      'timestamp>/ with their debug imagery, and the stage cache lives in ' +
+      'tensorez_cache/.',
     fields: [
-      { key: 'dir', type: 'path', default: 'output', pathKind: 'directory' },
+      { key: 'dir', type: 'path', optional: true, default: 'output', pathKind: 'directory',
+        help: 'unset: the recipe’s own path without the extension, so ' +
+          'iss_pass.toml writes into iss_pass/ beside itself' },
       { key: 'debug_frames', type: 'int', default: 10, min: 0,
         help: 'per-frame debug artifacts kept for first N frames' },
     ],

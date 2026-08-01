@@ -96,6 +96,16 @@ export function installMockBridge() {
       return v || null;
     },
 
+    // No real profile directory in the browser: the in-memory overlay stands
+    // in for it, so the scratch recipe and settings behave the same way.
+    async appPaths() {
+      return {
+        userData: '/appdata',
+        settings: '/appdata/settings.json',
+        scratchRecipe: '/appdata/untitled.toml',
+      };
+    },
+
     async readTextFile(p) {
       if (memFs.has(p)) return memFs.get(p);
       const url = toUrl(p) ?? p;

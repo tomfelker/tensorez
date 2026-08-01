@@ -29,8 +29,18 @@ producers, each optional, each yielding a single image:
   (or all) frames.
 
 The latter two rank frames by the ``lucky_scoring`` stage — a cached scalar
-score per frame (see scoring.py).  ``final.*`` is the fanciest enabled
-product: mfbd, else local_lucky, else the first-listed lucky_stack fraction.
+score per frame (see scoring.py).
+
+Every product is written under its own stable name (``local_lucky``,
+``lucky_stack_p10``, ``mfbd``, …) as ``.npy`` + ``.tif`` + ``.png``; nothing
+is anointed "the" result.  They land twice: in the output directory, where
+each run overwrites the last, and in that run's own timestamped directory
+under the runs directory, which also keeps the recipe, the log, the manifest
+and the ``examples/`` debug imagery.
+
+The output directory belongs to the recipe; the runs and cache directories
+belong to the machine (they can be pointed at a big fast scratch disk), so
+they arrive as constructor arguments, not from the recipe.
 """
 
 from __future__ import annotations
@@ -82,13 +92,16 @@ def _fraction_label(fraction: float) -> str:
 
 
 class Pipeline:
-    def __init__(self, recipe: Recipe, cache_dir: Path, emitter: EventEmitter):
+    def __init__(self, recipe: Recipe, cache_dir: Path, runs_dir: Path,
+                 emitter: EventEmitter):
         self.recipe = recipe
         self.cache_dir = Path(cache_dir)
+        self.runs_dir = Path(runs_dir)
         self.emitter = emitter
         self.run_dir: Path | None = None
         self.stage_summaries: list[dict[str, Any]] = []
         self.artifact_records: list[dict[str, Any]] = []
+        self.products: list[str] = []  # product base names, in production order
         self.current_stage: str | None = None
 
     # -- plumbing -----------------------------------------------------------
@@ -122,13 +135,22 @@ class Pipeline:
         self.artifact_records.append(record)
         self.emitter.emit("artifact", **record)
 
-    def preview(self, stage: str, name: str, image: torch.Tensor, normalize: bool = False,
+    def example(self, stage: str, name: str, image: torch.Tensor, normalize: bool = False,
                 frame: int | None = None) -> None:
+        """A debug/illustration image under ``examples/<stage>/`` — never a
+        product, so it stays inside the run directory."""
         assert self.run_dir is not None
-        rel = f"stages/{stage}/{name}.png"
+        rel = f"examples/{stage}/{name}.png"
         w, h = write_preview_png(self.run_dir / rel, image, normalize=normalize)
         kind = "sequence_frame" if frame is not None else "preview"
         self.artifact(stage, name, kind, rel, width=w, height=h, frame=frame)
+
+    def example_array(self, stage: str, name: str, array: np.ndarray) -> None:
+        assert self.run_dir is not None
+        rel = f"examples/{stage}/{name}.npy"
+        (self.run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        np.save(self.run_dir / rel, array)
+        self.artifact(stage, name, "array", rel)
 
     # -- cache keys ---------------------------------------------------------
 
@@ -138,6 +160,10 @@ class Pipeline:
     def _align_key(self, lights_seq: ImageSequence, darks_entry: CacheEntry | None) -> str:
         key = "stage: align\nlights:\n" + lights_seq.identity()
         key += f"darks_key: {darks_entry.key_hash if darks_entry else None}\n"
+        # keep_level isn't in the darks key (the master dark itself is the same
+        # either way; only how we apply it changes), so it belongs here.
+        keep_level = self.recipe.darks.keep_level if self.recipe.darks else False
+        key += f"darks_keep_level: {keep_level}\n"
         key += self._align_params().identity()
         return key
 
@@ -183,6 +209,18 @@ class Pipeline:
             max_wavelength_pixels=sc.max_wavelength_pixels,
         )
 
+    def _missing_input_hint(self, error: Exception) -> str:
+        """Relative recipe paths resolve against the working directory, so the
+        usual cause of a missing input is being in the wrong one."""
+        message = str(error)
+        if isinstance(error, FileNotFoundError):
+            message += (
+                f"\n(recipe paths resolve against the working directory, currently "
+                f"{Path.cwd()} — if they are relative to the recipe, run from "
+                f"{self.recipe.path.parent})"
+            )
+        return message
+
     def _sequences(self) -> tuple[ImageSequence, ImageSequence | None]:
         r = self.recipe
         try:
@@ -194,7 +232,7 @@ class Pipeline:
                 debayer=r.lights.debayer,
             )
         except (FileNotFoundError, ValueError) as e:
-            raise PipelineError(str(e), stage="lights")
+            raise PipelineError(self._missing_input_hint(e), stage="lights")
         darks = None
         if r.darks is not None:
             try:
@@ -208,7 +246,7 @@ class Pipeline:
                     debayer=r.lights.debayer,
                 )
             except (FileNotFoundError, ValueError) as e:
-                raise PipelineError(str(e), stage="darks")
+                raise PipelineError(self._missing_input_hint(e), stage="darks")
         return lights, darks
 
     # -- validate -----------------------------------------------------------
@@ -235,7 +273,11 @@ class Pipeline:
             stages.append({"stage": "local_lucky_stats", "cached": stats_entry.complete})
         return {
             "recipe": self.recipe.resolved_dict(),
+            "name": self.recipe.name,
             "frame_count": len(lights),
+            "working_dir": str(Path.cwd()),
+            "output_dir": str(self.recipe.output_dir),
+            "runs_dir": str(self.runs_dir / self.recipe.name),
             "stages": stages,
         }
 
@@ -246,8 +288,10 @@ class Pipeline:
         run_started_utc = _dt.datetime.now(_dt.timezone.utc).isoformat()
         lights_seq, darks_seq = self._sequences()
 
-        # Run directory: <output.dir>/<name>/<UTC timestamp>/
-        base = Path(recipe.output.dir) / recipe.name
+        # Run directory: <runs dir>/<recipe name>/<UTC timestamp>/.  The name
+        # level matters once the runs directory is shared — pointed at one
+        # scratch disk, it keeps each recipe's history its own.
+        base = self.runs_dir / recipe.name
         run_dir = base / _utc_timestamp()
         suffix = 1
         while run_dir.exists():
@@ -255,14 +299,15 @@ class Pipeline:
             run_dir = base / f"{_utc_timestamp()}-{suffix}"
         run_dir.mkdir(parents=True)
         self.run_dir = run_dir
-        (run_dir / "stages").mkdir()
         shutil.copyfile(recipe.path, run_dir / "recipe.toml")
         self.emitter.open_log(run_dir / "log.txt")
 
         self.emitter.emit(
             "run_start",
             recipe_path=str(recipe.path),
+            name=recipe.name,
             recipe=recipe.resolved_dict(),
+            output_dir=str(recipe.output_dir),
             run_dir=str(run_dir),
             frame_count=len(lights_seq),
         )
@@ -294,44 +339,40 @@ class Pipeline:
         if recipe.lucky_scoring is not None:
             scores = self._run_scoring(obs, align_entry)
 
-        local_image: torch.Tensor | None = None
         if recipe.local_lucky is not None:
-            local_image = self._run_local_lucky(obs, average_image, align_entry)
+            self._run_local_lucky(obs, average_image, align_entry)
 
-        stack_products: list[tuple[str, torch.Tensor]] = []
         if recipe.lucky_stack is not None:
             assert scores is not None  # recipe validation guarantees scoring
-            stack_products = self._run_lucky_stack(obs, scores)
+            self._run_lucky_stack(obs, scores)
 
-        mfbd_image: torch.Tensor | None = None
         if recipe.mfbd is not None:
-            mfbd_image = self._run_mfbd(obs, scores)
+            self._run_mfbd(obs, scores)
 
-        # final.* is the fanciest enabled product; the others remain available
-        # as their stages/<stage>/ artifacts.
-        if mfbd_image is not None:
-            result = mfbd_image
-        elif local_image is not None:
-            result = local_image
-        else:
-            result = stack_products[0][1]
-
+        # Publish: the products already live at the top of the run directory;
+        # copy them beside the recipe, where each run overwrites the last.
         with self.stage("output", cached=False):
-            write_npy(self.run_dir / "final.npy", result)
-            self.artifact("output", "final", "array", "final.npy")
-            w, h = write_tiff16(self.run_dir / "final.tif", result)
-            self.artifact("output", "final", "image", "final.tif", width=w, height=h)
-            w, h = write_preview_png(self.run_dir / "final_preview.png", result)
-            self.artifact("output", "final_preview", "preview", "final_preview.png",
-                          width=w, height=h)
+            out_dir = recipe.output_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for name in self.products:
+                for suffix in (".npy", ".tif", ".png"):
+                    shutil.copyfile(run_dir / (name + suffix), out_dir / (name + suffix))
+            self.emitter.log(
+                f"output: {len(self.products)} product(s) in {out_dir}: "
+                + ", ".join(self.products)
+            )
 
         manifest = {
             "manifest_version": 0,
             "recipe": recipe.resolved_dict(),
             "run": {
+                "name": recipe.name,
                 "started_utc": run_started_utc,
                 "seconds": round(self.emitter.now(), 3),
                 "frame_count": len(lights_seq),
+                "working_dir": str(Path.cwd()),
+                "output_dir": str(recipe.output_dir),
+                "products": list(self.products),
             },
             "stages": self.stage_summaries,
             "artifacts": self.artifact_records,
@@ -340,7 +381,12 @@ class Pipeline:
         tmp.write_text(json.dumps(manifest, indent=2))
         os.replace(tmp, run_dir / "manifest.json")
 
-        self.emitter.emit("done", seconds=round(self.emitter.now(), 3), final="final.tif")
+        self.emitter.emit(
+            "done",
+            seconds=round(self.emitter.now(), 3),
+            products=list(self.products),
+            output_dir=str(recipe.output_dir),
+        )
         return run_dir
 
     # -- darks --------------------------------------------------------------
@@ -350,22 +396,38 @@ class Pipeline:
         if darks_seq is None:
             return None, None
         entry = CacheEntry(self.cache_dir, "darks", self._darks_key(darks_seq))
-        if entry.complete:
-            with self.stage("darks", cached=True):
-                pass
-            data = entry.load_npz("dark")
-            return torch.from_numpy(data["mean"]), torch.from_numpy(data["variance"])
+        cached = entry.complete
+        with self.stage("darks", cached=cached):
+            if cached:
+                data = entry.load_npz("dark")
+                mean = torch.from_numpy(data["mean"])
+                variance = torch.from_numpy(data["variance"])
+            else:
+                welford = Welford()
+                total = len(darks_seq)
+                for i in range(total):
+                    welford.update(darks_seq.read_frame(i))
+                    self.emitter.progress("darks", i + 1, total, message="averaging darks")
+                mean, variance = welford.mean, welford.variance
+                entry.save_npz("dark", mean=mean.numpy(), variance=variance.numpy())
+                entry.mark_complete()
+                self.example("darks", "dark_mean", mean, normalize=True)
 
-        with self.stage("darks", cached=False):
-            welford = Welford()
-            total = len(darks_seq)
-            for i in range(total):
-                welford.update(darks_seq.read_frame(i))
-                self.emitter.progress("darks", i + 1, total, message="averaging darks")
-            mean, variance = welford.mean, welford.variance
-            entry.save_npz("dark", mean=mean.numpy(), variance=variance.numpy())
-            entry.mark_complete()
-            self.preview("darks", "dark_mean", mean, normalize=True)
+            # `keep_level` subtracts only the dark's *pattern*: zeroing the
+            # master dark's own mean leaves that pedestal in the lights, so
+            # calibrated pixels stay positive instead of scattering about 0.
+            level = float(mean.mean())
+            if self.recipe.darks.keep_level:
+                mean = mean - level
+                self.emitter.log(
+                    f"darks: keep_level — subtracting the dark's pattern only, "
+                    f"leaving its mean level of {level:.5g} in the lights"
+                )
+            else:
+                self.emitter.log(
+                    f"darks: master dark mean level {level:.5g}; subtracting it in full "
+                    f"(set keep_level = true to keep the level and only remove the pattern)"
+                )
         return mean, variance
 
     # -- align --------------------------------------------------------------
@@ -406,6 +468,19 @@ class Pipeline:
                 # Read the calibrated frame once; derive both the shift and
                 # the running average from it.
                 image = obs.calibrated(i)
+                if i == 0 and obs.dark_mean is not None:
+                    # Dark subtraction pushes sky pixels below zero — harmless
+                    # for everything downstream (alignment is mean-relative and
+                    # the luckiness/scoring bands drop DC), and .npy keeps them,
+                    # but .tif/.png are unsigned and clip them to black.
+                    below = float((image < 0).float().mean()) * 100.0
+                    self.emitter.log(
+                        f"align: after dark subtraction {below:.1f}% of frame 0's pixels are "
+                        f"negative (min {float(image.min()):+.4g}); .npy keeps them, .tif/.png "
+                        f"clip them to black"
+                        + ("" if self.recipe.darks.keep_level else
+                           " — [darks] keep_level = true would keep the pedestal instead")
+                    )
                 if per_channel:
                     shift = compute_com_shift_per_channel(image)
                 elif p.center_of_mass:
@@ -440,11 +515,21 @@ class Pipeline:
     # -- products -----------------------------------------------------------
 
     def _publish_product(self, stage: str, name: str, image: torch.Tensor) -> None:
-        """A producer's named output: 16-bit TIFF + preview under its stage."""
-        rel = f"stages/{stage}/{name}.tif"
-        w, h = write_tiff16(self.run_dir / rel, image)
-        self.artifact(stage, name, "image", rel, width=w, height=h)
-        self.preview(stage, name, image)
+        """A producer's result, under a name of its own: exact ``.npy``,
+        16-bit linear ``.tif``, and an sRGB ``.png`` preview, at the top of
+        the run directory (the output stage copies them out afterwards).
+
+        Every stage names its products the same way every time — there is no
+        "final", and no precedence between producers.
+        """
+        assert self.run_dir is not None
+        write_npy(self.run_dir / f"{name}.npy", image)
+        self.artifact(stage, name, "array", f"{name}.npy")
+        w, h = write_tiff16(self.run_dir / f"{name}.tif", image)
+        self.artifact(stage, name, "image", f"{name}.tif", width=w, height=h)
+        w, h = write_preview_png(self.run_dir / f"{name}.png", image)
+        self.artifact(stage, name, "preview", f"{name}.png", width=w, height=h)
+        self.products.append(name)
 
     # -- lucky scoring ------------------------------------------------------
 
@@ -471,10 +556,7 @@ class Pipeline:
                 entry.save_npz("scores", scores=scores)
                 entry.mark_complete()
 
-            rel = "stages/lucky_scoring/frame_scores.npy"
-            (self.run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-            np.save(self.run_dir / rel, scores)
-            self.artifact("lucky_scoring", "frame_scores", "array", rel)
+            self.example_array("lucky_scoring", "frame_scores", scores)
             best = np.argsort(scores)[::-1][: min(10, total)]
             self.emitter.log(
                 "lucky_scoring: best frames: "
@@ -502,8 +584,8 @@ class Pipeline:
         total = len(obs)
 
         with self.stage("local_lucky", cached=False, pass1_cached=pass1_cached):
-            self.preview("local_lucky", "unweighted_average", average_image)
-            rel = "stages/local_lucky/unweighted_average.npy"
+            self.example("local_lucky", "unweighted_average", average_image)
+            rel = "examples/local_lucky/unweighted_average.npy"
             write_npy(self.run_dir / rel, average_image)
             self.artifact("local_lucky", "unweighted_average", "array", rel)
 
@@ -519,7 +601,7 @@ class Pipeline:
                     luckiness = algo.compute(image, dark_variance)
                     welford.update(luckiness)
                     if i < debug_frames:
-                        self.preview("local_lucky", f"luckiness_{i:08d}", luckiness,
+                        self.example("local_lucky", f"luckiness_{i:08d}", luckiness,
                                      normalize=True, frame=i)
                     self.emitter.progress("local_lucky", i + 1, total,
                                           message="pass 1/2: luckiness statistics")
@@ -527,8 +609,8 @@ class Pipeline:
                 stats_entry.save_npz("stats", mean=luck_mean.numpy(), stdev=luck_stdev.numpy())
                 stats_entry.mark_complete()
 
-            self.preview("local_lucky", "luckiness_mean", luck_mean, normalize=True)
-            self.preview("local_lucky", "luckiness_stdev", luck_stdev, normalize=True)
+            self.example("local_lucky", "luckiness_mean", luck_mean, normalize=True)
+            self.example("local_lucky", "luckiness_stdev", luck_stdev, normalize=True)
 
             # Bilinearly-demosaiced Bayer sources: weight each pixel only by
             # channels the sensor actually sampled there, so interpolated
@@ -559,7 +641,7 @@ class Pipeline:
                     )
                     weight = weight * sample_mask
                 if i < debug_frames:
-                    self.preview("local_lucky", f"weight_{i:08d}", weight,
+                    self.example("local_lucky", f"weight_{i:08d}", weight,
                                  normalize=True, frame=i)
                 if weighted_sum is None:
                     weighted_sum = torch.zeros_like(image)
@@ -573,7 +655,7 @@ class Pipeline:
             result = torch.where(
                 total_weight > 0, weighted_sum / total_weight, torch.zeros_like(weighted_sum)
             )
-            self.preview("local_lucky", "total_weight", total_weight, normalize=True)
+            self.example("local_lucky", "total_weight", total_weight, normalize=True)
             avg_frames = float(total_weight.mean())
             self.emitter.log(
                 f"local_lucky: average effective frames per pixel: {avg_frames:.2f} of {total}"
@@ -682,12 +764,8 @@ class Pipeline:
             except ValueError as e:
                 raise PipelineError(str(e), stage="mfbd")
 
-            rel = "stages/mfbd/loss_history.npy"
-            (self.run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-            np.save(self.run_dir / rel, result.loss_history)
-            self.artifact("mfbd", "loss_history", "array", rel)
-
-            self.preview("mfbd", "psf_examples", psf_examples_image(result.psfs))
+            self.example_array("mfbd", "loss_history", result.loss_history)
+            self.example("mfbd", "psf_examples", psf_examples_image(result.psfs))
             self._publish_product("mfbd", "mfbd", result.object_nchw)
 
         return result.object_nchw

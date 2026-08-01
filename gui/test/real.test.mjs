@@ -11,7 +11,7 @@ import { REPO, gotoApp, newPage, shoot, checkNoPageErrors } from './helper.mjs';
 
 const IMAGE_KINDS = new Set(['preview', 'sequence_frame']);
 
-// Latest timestamped run dir (containing a manifest) under base.
+// Latest timestamped run dir (containing a manifest) under a tensorez_runs/.
 export function latestRun(base) {
   if (!fs.existsSync(base)) return null;
   const runs = fs.readdirSync(base)
@@ -31,8 +31,9 @@ export function expectations(runDir) {
 }
 
 export default async function run(browser) {
-  const REAL_RUN = latestRun(`${REPO}/cli/output/jupiter_mvi_6906`);
-  assert.ok(REAL_RUN, 'no completed jupiter_mvi_6906 run found — run the CLI first');
+  const REAL_RUN = latestRun(`${REPO}/cli/examples/tensorez_runs/jupiter`);
+  assert.ok(REAL_RUN,
+    'no completed jupiter run found — from cli/examples, run: python -m tensorez run jupiter.toml');
   const exp = expectations(REAL_RUN);
 
   const page = await newPage(browser);
@@ -45,7 +46,8 @@ export default async function run(browser) {
   await page.waitForSelector('.stage-group');
 
   const summary = await page.locator('.results-summary').textContent();
-  assert.match(summary, /jupiter_mvi_6906/);
+  assert.match(summary, /jupiter/);
+  assert.match(summary, /local_lucky/); // the products list
   assert.match(summary, new RegExp(String(exp.manifest.run.frame_count)));
 
   const groups = await page.locator('.stage-group h3').allTextContents();
@@ -66,8 +68,8 @@ export default async function run(browser) {
   assert.deepEqual(broken, [], 'real thumbnails failed to load');
   await shoot(page, '11-real-results.png');
 
-  // full-size zoom on the real final preview
-  await page.locator('.artifact-thumb', { hasText: 'final_preview' }).click();
+  // full-size zoom on a real product preview
+  await page.locator('.artifact-thumb', { hasText: 'local_lucky' }).first().click();
   await page.waitForFunction(() => {
     const img = document.querySelector('#lightbox img');
     return img && img.complete && img.naturalWidth > 0;

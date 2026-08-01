@@ -3,12 +3,14 @@
     "configurations": [
         {
             // Open a recipe .toml, then F5 to debug the pipeline running it.
+            // cwd is the recipe's own folder: recipe paths (and the output
+            // directory) resolve against the working directory.
             "name": "CLI: run current recipe",
             "type": "debugpy",
             "request": "launch",
             "module": "tensorez",
-            "args": ["run", "${file}", "--pretty"],
-            "cwd": "${workspaceFolder}/cli",
+            "args": ["run", "${fileBasename}"],
+            "cwd": "${fileDirname}",
             "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "console": "integratedTerminal",
             "justMyCode": false
@@ -18,19 +20,19 @@
             "type": "debugpy",
             "request": "launch",
             "module": "tensorez",
-            "args": ["run", "examples/jupiter.toml", "--pretty"],
-            "cwd": "${workspaceFolder}/cli",
+            "args": ["run", "jupiter.toml"],
+            "cwd": "${workspaceFolder}/cli/examples",
             "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "console": "integratedTerminal",
             "justMyCode": false
         },
         {
-            "name": "CLI: run jupiter deconv example",
+            "name": "CLI: run jupiter mfbd example",
             "type": "debugpy",
             "request": "launch",
             "module": "tensorez",
-            "args": ["run", "examples/jupiter_deconv.toml", "--pretty"],
-            "cwd": "${workspaceFolder}/cli",
+            "args": ["run", "jupiter_mfbd.toml"],
+            "cwd": "${workspaceFolder}/cli/examples",
             "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "console": "integratedTerminal",
             "justMyCode": false

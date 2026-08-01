@@ -1,10 +1,10 @@
 """JSONL event stream (CONTRACT.md §2).
 
-One JSON object per line on stdout; every event carries ``event`` and ``t``
-(monotonic seconds since run start).  With ``--pretty`` the stdout side is
-rendered for humans instead, but the raw JSONL is always mirrored verbatim
-to ``log.txt`` in the run directory once that directory exists (events
-emitted before then are buffered and flushed into the log when it opens).
+With ``--events``, one JSON object per line on stdout; every event carries
+``event`` and ``t`` (monotonic seconds since run start).  Without it (the
+default) stdout is rendered for humans instead — but either way the raw JSONL
+is mirrored verbatim to ``log.txt`` in the run directory once that directory
+exists (events emitted before then are buffered and flushed when it opens).
 
 ``progress`` events are throttled to ~10/s per stage; the final
 (current == total) progress event is always emitted.
@@ -34,7 +34,9 @@ class EventEmitter:
         return time.monotonic() - self.start
 
     def open_log(self, path: Path) -> None:
-        self._log_file = open(path, "w", buffering=1)
+        # utf-8 explicitly: the mirrored JSONL is ASCII-escaped, but don't let
+        # a machine's locale decide how this file is written either way.
+        self._log_file = open(path, "w", buffering=1, encoding="utf-8")
         for line in self._pending_log_lines:
             self._log_file.write(line + "\n")
         self._pending_log_lines.clear()
@@ -83,7 +85,8 @@ class EventEmitter:
         t = f"[{e['t']:8.2f}s]"
         kind = e["event"]
         if kind == "run_start":
-            return f"{t} run: {e['recipe_path']} -> {e['run_dir']} ({e['frame_count']} frames)"
+            return (f"{t} run: {e['recipe_path']} ({e['frame_count']} frames)\n"
+                    f"{' ' * len(t)}   -> {e['output_dir']}")
         if kind == "stage_start":
             cached = " (cached)" if e.get("cached") else ""
             return f"{t} stage {e['stage']}{cached}"
@@ -100,5 +103,6 @@ class EventEmitter:
             tb = ("\n" + e["traceback"]) if "traceback" in e else ""
             return f"{t} ERROR: {e['message']}{tb}"
         if kind == "done":
-            return f"{t} done in {e['seconds']:.2f}s -> {e['final']}"
+            products = ", ".join(e.get("products", ())) or "(none)"
+            return f"{t} done in {e['seconds']:.2f}s -> {products}"
         return json.dumps(e)

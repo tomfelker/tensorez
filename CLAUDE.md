@@ -3,8 +3,12 @@
 Planetary lucky-imaging stacker. PyTorch CLI does all processing; Electron GUI
 just edits recipe TOMLs, spawns the CLI, and renders its JSONL event stream.
 **DESIGN_CONTRACT.md is the source of truth** for the recipe schema, event
-stream, and output/manifest layout — keep CLI and GUI changes in sync with it
-and bump its version fields.
+stream, and output/manifest layout — keep CLI and GUI changes in sync with it.
+
+**Don't preserve backwards compatibility.** The design is still moving: change
+both sides together, let removed keys become unknown-key/unknown-section errors
+rather than deprecations, and note the break in the contract's Amendments. There
+is deliberately no recipe schema version to bump.
 
 ## Layout
 
@@ -30,9 +34,10 @@ inside resolves against the shell cwd). The GUI finds Python via
   (`npx playwright install chromium` once). `pretest` auto-runs
   `scripts/gen-mock.mjs` which writes `gui/mockrun/` + mock event streams.
 - The `real` and `mfbd` GUI tests replay actual CLI output: they need
-  completed runs of `cli/examples/jupiter.toml` and `jupiter_mfbd.toml`
-  (run from `cli/`; outputs land in `cli/output/`, gitignored). They fail with
-  a "run the CLI first" message otherwise.
+  completed runs of `cli/examples/jupiter.toml` and `jupiter_mfbd.toml`,
+  **run from `cli/examples/`** (recipe paths resolve against the cwd). Their
+  output lands in `cli/examples/{<recipe stem>,tensorez_runs,tensorez_cache}/`,
+  all gitignored. They fail with a "run the CLI first" message otherwise.
 - GUI tests rewrite `gui/screenshots/` on every run — untracked on purpose.
 
 ## Gotchas (each of these has bitten before)
@@ -45,14 +50,26 @@ inside resolves against the shell cwd). The GUI finds Python via
   repo-relative paths (recipe paths resolve against the recipe file's dir).
   The vibe-coding VM once left `/root/tensorez/...` everywhere.
 - Recipe parsing is strict: unknown keys are hard errors, and exactly one
-  pixel-scale representation is allowed in `[deconv]` (direct or camera keys).
-- The lucky stage is never fully cached (pass 2 always runs); `deconv` is never
-  cached at all. Don't "fix" that.
+  pixel-scale representation is allowed in `[mfbd]` (direct or camera keys).
+- The `local_lucky` stage is never fully cached (pass 2 always runs); `mfbd` is
+  never cached at all. Don't "fix" that.
 - Event-stream consumers must ignore unknown event types and fields.
+- **Recipe paths resolve against the cwd**, not the recipe's directory (the
+  GUI spawns the CLI with cwd = the recipe's folder). The recipe file names
+  everything: there is no `[recipe]` section at all, and products default to
+  `<cwd>/<recipe stem>/`. No `final.*` — each producer writes
+  `<its name>.{npy,tif,png}`.
+- Run archives and the cache are `--runs-dir` / `--cache-dir` (default
+  `./tensorez_runs/<recipe stem>/<timestamp>/` and `./tensorez_cache`), never
+  recipe keys: they're machine preferences, so they can live on a scratch disk.
+  The GUI stores both in its settings file (`renderer/js/settings.js`).
+- The CLI prints for humans by default; `--events` is what emits JSONL. Tests
+  and the GUI must pass it (conftest's `run_cli` adds it automatically).
 
 ## Style
 
-- Torch tensors are NCHW float32 linear-light RGB; `final.npy` on disk is HWC.
+- Torch tensors are NCHW float32 linear-light RGB; the `.npy` products on disk
+  are HWC.
 - GUI is dependency-light vanilla JS (only `smol-toml` at runtime); keep it that
   way — the renderer must keep working in both Electron and the mock-bridge
   browser mode.

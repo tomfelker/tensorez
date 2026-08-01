@@ -71,16 +71,25 @@ Using
 ==
 The CLI takes a recipe `.toml` describing your input files and processing options (see `cli/examples/` for real ones, and DESIGN_CONTRACT.md for every key):
 
+Keep the recipe with the capture files it processes — that's the intended workflow, and it makes everything else fall out:
+
 ```bash
-tensorez validate my_recipe.toml --pretty   # parse + resolve, report cache state, do no work
-tensorez run my_recipe.toml --pretty        # run the pipeline with human-readable progress
+cd data/2026-01-02_jupiter    # where jupiter.ser and jupiter.toml live
+tensorez validate jupiter.toml   # parse + resolve, report cache state, do no work
+tensorez run jupiter.toml        # run the pipeline
 ```
 
-(`python -m tensorez ...` works too. Without `--pretty` you get the JSONL event stream the GUI consumes.)
+(`python -m tensorez ...` works too. Add `--events` for the JSONL event stream the GUI consumes.)
 
-Runs land in `<output.dir>/<recipe name>/<timestamp>/` — `final.tif` is the 16-bit linear-light deliverable, `final_preview.png` the sRGB preview, and `stages/` holds per-stage debug artifacts. Completed stages are cached in `./cache` (override with `--cache-dir`), so reruns after tweaking one stage only redo what changed.
+Paths in a recipe resolve against the current directory, the usual shell rule — so run recipes from where their inputs are. The recipe file names the run, and unless `[output] dir` says otherwise you get:
 
-In the GUI: open or build a recipe in the left panel, hit Run, and watch progress and artifacts appear live.
+- `jupiter/` — the products, one set per enabled stage: `local_lucky.tif`, `mfbd.tif`, `lucky_stack_p10.tif`, … each also as a `.png` preview and an exact float32 `.npy`. Each run overwrites them.
+- `tensorez_runs/jupiter/<timestamp>/` — every past run, keeping its own copy of the products, the recipe it used, the log, and `examples/` full of per-stage debug imagery.
+- `tensorez_cache/` — completed stages, so reruns after tweaking one stage only redo what changed.
+
+Those last two hold bulk regenerable data, so `--runs-dir` and `--cache-dir` can send them somewhere else entirely — a big fast scratch disk, say — leaving your capture drive holding only recipes and results.
+
+In the GUI: open or build a recipe in the left panel, hit Run, and watch progress and artifacts appear live. It runs the CLI from the recipe's own folder, so the same rules apply. An unsaved recipe is kept in a scratch file so it can run immediately; Save As puts it wherever you like (beside your captures, ideally). The runs and cache locations are settings, under "Where runs and cache go" in the Run view.
 
 Architecture
 ==

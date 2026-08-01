@@ -142,80 +142,70 @@ function comTrack(x, y, size) {
 
 // ---------- artifact + event definitions ----------
 
+// Every producer publishes its result under its own name, in all three
+// formats, at the top of the run dir (contract §3) — there is no "final".
+function product(stage, name, sharp) {
+  return [
+    { stage, name, kind: 'array', path: `${name}.npy`,
+      gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
+    { stage, name, kind: 'image', path: `${name}.tif`,
+      gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
+    { stage, name, kind: 'preview', path: `${name}.png`, width: 256, height: 256,
+      gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp })) },
+  ];
+}
+
 const ARTIFACTS = [
   { stage: 'align', name: 'com_track', kind: 'preview',
-    path: 'stages/align/com_track.png', width: 256, height: 256,
+    path: 'examples/align/com_track.png', width: 256, height: 256,
     gen: (s) => makeImage(s, comTrack) },
   { stage: 'align', name: 'aligned_first_frame', kind: 'preview',
-    path: 'stages/align/aligned_first_frame.png', width: 256, height: 256,
+    path: 'examples/align/aligned_first_frame.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 0.5 })) },
   { stage: 'lucky_scoring', name: 'frame_scores', kind: 'array',
-    path: 'stages/lucky_scoring/frame_scores.npy',
+    path: 'examples/lucky_scoring/frame_scores.npy',
     gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
   { stage: 'local_lucky', name: 'weights_pass1', kind: 'preview',
-    path: 'stages/local_lucky/weights_pass1.png', width: 256, height: 256,
+    path: 'examples/local_lucky/weights_pass1.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => noiseMap(x, y, n, { tint: [0.8, 0.75, 1.0] })) },
   { stage: 'local_lucky', name: 'frame_0000', kind: 'sequence_frame', frame: 0,
-    path: 'stages/local_lucky/frames/frame_0000.png', width: 128, height: 128,
+    path: 'examples/local_lucky/frames/frame_0000.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x + 3, y - 2, n, { sharp: 0.45 })) },
   { stage: 'local_lucky', name: 'frame_0001', kind: 'sequence_frame', frame: 1,
-    path: 'stages/local_lucky/frames/frame_0001.png', width: 128, height: 128,
+    path: 'examples/local_lucky/frames/frame_0001.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x - 2, y + 1, n, { sharp: 0.55 })) },
   { stage: 'local_lucky', name: 'frame_0002', kind: 'sequence_frame', frame: 2,
-    path: 'stages/local_lucky/frames/frame_0002.png', width: 128, height: 128,
+    path: 'examples/local_lucky/frames/frame_0002.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x, y + 3, n, { sharp: 0.4 })) },
   { stage: 'local_lucky', name: 'frame_0003', kind: 'sequence_frame', frame: 3,
-    path: 'stages/local_lucky/frames/frame_0003.png', width: 128, height: 128,
+    path: 'examples/local_lucky/frames/frame_0003.png', width: 128, height: 128,
     gen: (s) => makeImage(128, (x, y, n) => planet(x - 1, y, n, { sharp: 0.6 })) },
   { stage: 'local_lucky', name: 'luckiness_mean', kind: 'preview',
-    path: 'stages/local_lucky/luckiness_mean.png', width: 256, height: 256,
+    path: 'examples/local_lucky/luckiness_mean.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => noiseMap(x, y, n, { scale: 7, tint: [1, 0.9, 0.7] })) },
   { stage: 'local_lucky', name: 'unweighted_average', kind: 'preview',
-    path: 'stages/local_lucky/unweighted_average.png', width: 256, height: 256,
+    path: 'examples/local_lucky/unweighted_average.png', width: 256, height: 256,
     gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 0.35 })) },
   { stage: 'local_lucky', name: 'luckiness', kind: 'array',
-    path: 'stages/local_lucky/luckiness.npy',
+    path: 'examples/local_lucky/luckiness.npy',
     gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
-  { stage: 'local_lucky', name: 'local_lucky', kind: 'image',
-    path: 'stages/local_lucky/local_lucky.tif',
-    gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
-  { stage: 'local_lucky', name: 'local_lucky', kind: 'preview',
-    path: 'stages/local_lucky/local_lucky.png', width: 256, height: 256,
-    gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 1.1 })) },
-  { stage: 'lucky_stack', name: 'lucky_stack_p10', kind: 'image',
-    path: 'stages/lucky_stack/lucky_stack_p10.tif',
-    gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
-  { stage: 'lucky_stack', name: 'lucky_stack_p10', kind: 'preview',
-    path: 'stages/lucky_stack/lucky_stack_p10.png', width: 256, height: 256,
-    gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 0.9 })) },
+  ...product('local_lucky', 'local_lucky', 1.1),
+  ...product('lucky_stack', 'lucky_stack_p10', 0.9),
   { stage: 'mfbd', name: 'psf_examples', kind: 'preview',
-    path: 'stages/mfbd/psf_examples.png', width: 256, height: 256,
+    path: 'examples/mfbd/psf_examples.png', width: 256, height: 256,
     gen: (s) => makeImage(s, psfGrid) },
   { stage: 'mfbd', name: 'loss_history', kind: 'array',
-    path: 'stages/mfbd/loss_history.npy',
+    path: 'examples/mfbd/loss_history.npy',
     gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
-  { stage: 'mfbd', name: 'mfbd', kind: 'image',
-    path: 'stages/mfbd/mfbd.tif',
-    gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
-  { stage: 'mfbd', name: 'mfbd', kind: 'preview',
-    path: 'stages/mfbd/mfbd.png', width: 256, height: 256,
-    gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 1.4 })) },
-  { stage: 'output', name: 'final_preview', kind: 'preview',
-    path: 'final_preview.png', width: 256, height: 256,
-    gen: (s) => makeImage(s, (x, y, n) => planet(x, y, n, { sharp: 1.4 })) },
-  { stage: 'output', name: 'final', kind: 'image',
-    path: 'final.tif',
-    gen: () => Buffer.from('II*\0 mock tiff placeholder', 'latin1') },
-  { stage: 'output', name: 'final_exact', kind: 'array',
-    path: 'final.npy',
-    gen: () => Buffer.from('\x93NUMPY mock — not a real npy\n', 'latin1') },
+  ...product('mfbd', 'mfbd', 1.4),
 ];
 
+const PRODUCTS = ['local_lucky', 'lucky_stack_p10', 'mfbd'];
+
 const RECIPE = {
-  recipe: { version: 0, name: 'jupiter_demo' },
   lights: { paths: ['data/jupiter.ser'], start_frame: 0, frame_step: 1, end_frame: 300,
             debayer: 'bilinear' },
-  darks: { paths: ['data/darks.ser'] },
+  darks: { paths: ['data/darks.ser'], keep_level: false },
   align: { center_of_mass: true, crop: [512, 512],
            crop_align: 2, crop_offsets: [0, 0] },
   lucky_scoring: { metric: 'fourier_bandpass', min_wavelength_pixels: 5.0,
@@ -230,14 +220,10 @@ const RECIPE = {
           psf_model: 'kl', n_modes: 20, iterations: 100, optimizer: 'adam',
           lr_obj: 0.02, lr_modes: 0.08, apodization_border: 0,
           frequency_cutoff: [0.2, 0.3] },
-  output: { dir: 'output', debug_frames: 10 },
+  output: { debug_frames: 10 },  // no dir: defaults to the recipe's own name
 };
 
-const RECIPE_TOML = `[recipe]
-version = 0
-name = "jupiter_demo"
-
-[lights]
+const RECIPE_TOML = `[lights]
 paths = ["data/jupiter.ser"]
 start_frame = 0
 frame_step = 1
@@ -246,6 +232,7 @@ debayer = "bilinear"
 
 [darks]
 paths = ["data/darks.ser"]
+keep_level = false
 
 [align]
 center_of_mass = true
@@ -288,11 +275,12 @@ apodization_border = 0
 frequency_cutoff = [0.2, 0.3]
 
 [output]
-dir = "output"
 debug_frames = 10
 `;
 
-const RUN_DIR = 'output/jupiter_demo/2026-07-29T17-30-00Z';
+// As if run from the directory holding jupiter_demo.toml and its .ser files.
+const OUTPUT_DIR = 'jupiter_demo';
+const RUN_DIR = 'tensorez_runs/jupiter_demo/2026-07-29T17-30-00Z';
 
 function buildEvents({ fail = false } = {}) {
   const ev = [];
@@ -310,7 +298,8 @@ function buildEvents({ fail = false } = {}) {
   };
 
   push({ event: 'run_start', recipe_path: 'examples/jupiter_demo.toml',
-         recipe: RECIPE, run_dir: RUN_DIR, frame_count: 300 });
+         name: 'jupiter_demo', recipe: RECIPE, output_dir: OUTPUT_DIR,
+         run_dir: RUN_DIR, frame_count: 300 });
   push({ event: 'log', level: 'info',
          message: 'loaded 300 frames from data/jupiter.ser (RGB, 16-bit, 512×512)' });
 
@@ -320,7 +309,8 @@ function buildEvents({ fail = false } = {}) {
 
   push({ event: 'stage_start', stage: 'darks', cached: true });
   push({ event: 'stage_end', stage: 'darks', seconds: 0.0 });
-  push({ event: 'log', level: 'info', message: 'darks served from cache (cache/darks/8c1f2a90d3b4e5f6)' });
+  push({ event: 'log', level: 'info',
+         message: 'darks served from cache (tensorez_cache/darks/8c1f2a90d3b4e5f6)' });
 
   push({ event: 'stage_start', stage: 'align', cached: false });
   progress('align', 300, 'center-of-mass alignment', 10);
@@ -356,16 +346,14 @@ function buildEvents({ fail = false } = {}) {
   art(ARTIFACTS.find((a) => a.name === 'luckiness'));
   push({ event: 'log', level: 'info',
          message: 'local_lucky: average effective frames per pixel: 41.55 of 300' });
-  art(ARTIFACTS.find((a) => a.path === 'stages/local_lucky/local_lucky.tif'));
-  art(ARTIFACTS.find((a) => a.path === 'stages/local_lucky/local_lucky.png'));
+  ARTIFACTS.filter((a) => a.name === 'local_lucky').forEach(art);
   push({ event: 'stage_end', stage: 'local_lucky', seconds: 41.7 });
 
   push({ event: 'stage_start', stage: 'lucky_stack', cached: false });
   progress('lucky_stack', 30, 'stacking luckiest frames', 6);
   push({ event: 'log', level: 'info',
          message: 'lucky_stack: lucky_stack_p10 = best 30 of 300 frame(s)' });
-  art(ARTIFACTS.find((a) => a.path === 'stages/lucky_stack/lucky_stack_p10.tif'));
-  art(ARTIFACTS.find((a) => a.path === 'stages/lucky_stack/lucky_stack_p10.png'));
+  ARTIFACTS.filter((a) => a.name === 'lucky_stack_p10').forEach(art);
   push({ event: 'stage_end', stage: 'lucky_stack', seconds: 3.9 });
 
   // mfbd stage: per-iteration progress with the loss in `message`
@@ -380,30 +368,28 @@ function buildEvents({ fail = false } = {}) {
   }
   art(ARTIFACTS.find((a) => a.name === 'psf_examples'));
   art(ARTIFACTS.find((a) => a.name === 'loss_history'));
-  art(ARTIFACTS.find((a) => a.path === 'stages/mfbd/mfbd.tif'));
-  art(ARTIFACTS.find((a) => a.path === 'stages/mfbd/mfbd.png'));
+  ARTIFACTS.filter((a) => a.name === 'mfbd').forEach(art);
   push({ event: 'stage_end', stage: 'mfbd', seconds: 38.4 });
 
   push({ event: 'stage_start', stage: 'output', cached: false });
-  art(ARTIFACTS.find((a) => a.name === 'final_preview'));
-  art(ARTIFACTS.find((a) => a.name === 'final'));
-  art(ARTIFACTS.find((a) => a.name === 'final_exact'));
+  push({ event: 'log', level: 'info',
+         message: `output: 3 product(s) in ${OUTPUT_DIR}: ${PRODUCTS.join(', ')}` });
   push({ event: 'stage_end', stage: 'output', seconds: 0.8 });
 
-  push({ event: 'done', seconds: 89.4, final: 'final.tif' });
+  push({ event: 'done', seconds: 89.4, products: PRODUCTS, output_dir: OUTPUT_DIR });
   return ev;
 }
 
 // ---------- write everything ----------
 
 async function main() {
-  // fake run dir
+  // fake run dir, from scratch (so renamed artifacts don't linger)
+  await fsp.rm(path.join(GUI, 'mockrun'), { recursive: true, force: true });
   const events = buildEvents();
-  await fsp.mkdir(path.join(RUN, 'stages/align'), { recursive: true });
-  await fsp.mkdir(path.join(RUN, 'stages/lucky_scoring'), { recursive: true });
-  await fsp.mkdir(path.join(RUN, 'stages/local_lucky/frames'), { recursive: true });
-  await fsp.mkdir(path.join(RUN, 'stages/lucky_stack'), { recursive: true });
-  await fsp.mkdir(path.join(RUN, 'stages/mfbd'), { recursive: true });
+  for (const d of ['examples/align', 'examples/lucky_scoring',
+                   'examples/local_lucky/frames', 'examples/mfbd']) {
+    await fsp.mkdir(path.join(RUN, d), { recursive: true });
+  }
   for (const a of ARTIFACTS) {
     const data = a.gen(a.width || 256);
     await fsp.writeFile(path.join(RUN, a.path), data);
@@ -415,7 +401,9 @@ async function main() {
   const manifest = {
     manifest_version: 0,
     recipe: RECIPE,
-    run: { started_utc: '2026-07-29T17:30:00Z', seconds: 89.4, frame_count: 300 },
+    run: { name: 'jupiter_demo', started_utc: '2026-07-29T17:30:00Z', seconds: 89.4,
+           frame_count: 300, working_dir: '.', output_dir: OUTPUT_DIR,
+           products: PRODUCTS },
     stages: [
       { name: 'lights', cached: false, seconds: 3.1 },
       { name: 'darks', cached: true, seconds: 0.0 },

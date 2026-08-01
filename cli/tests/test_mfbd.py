@@ -30,10 +30,6 @@ from tensorez import ser
 from tensorez.recipe import RecipeError, load_recipe
 
 MFBD_RECIPE = f"""
-[recipe]
-version = 0
-name = "mfbd"
-
 [lights]
 paths = ["{SYNTHETIC_SER.as_posix()}"]
 
@@ -132,9 +128,6 @@ def test_mfbd_wavelength_channel_mismatch_is_runtime_error(tmp_path: Path) -> No
     ser.write_ser(path, frames, ser.ColorId.MONO)
     recipe = tmp_path / "r.toml"
     recipe.write_text(f"""
-[recipe]
-version = 0
-name = "mono"
 [lights]
 paths = ["{path.as_posix()}"]
 [lucky_scoring]
@@ -154,19 +147,34 @@ debug_frames = 0
     assert "wavelengths_nm" in events[-1]["message"]
 
 
-def test_undersampling_warns_but_never_fails() -> None:
-    """Coarse pixel scales log warnings (severe or Nyquist) instead of raising."""
+def test_undersampling_warns_until_the_pixel_exceeds_lambda_over_d() -> None:
+    """Coarse pixel scales warn; coarser than lambda/D is a hard, explained stop.
+
+    torchmfbd itself refuses below one pixel per lambda/D, but its own error
+    message crashes on a missing attribute — so we must catch it first.
+    """
+    import pytest
+
     from tensorez.deconv import apply_superpixel_scale, check_optics
     from tensorez.recipe import MfbdConfig
 
     def collect(cfg):
         events: list[tuple[str, str]] = []
-        check_optics(cfg, channels=1, log=lambda m, level="info": events.append((level, m)))
+        check_optics(cfg, len(cfg.wavelengths_nm),
+                     log=lambda m, level="info": events.append((level, m)))
         return events
 
-    # lambda/D at 550 nm on a C11 is ~0.41"; 1.0"/px doesn't even span it
-    severe = collect(MfbdConfig(pixel_scale_arcsec=1.0, wavelengths_nm=(550.0,)))
-    assert any(lvl == "warning" and "SEVERELY undersampled" in m for lvl, m in severe)
+    # lambda/D at 550 nm on a C11 is ~0.41"; 1.0"/px doesn't even span it, and
+    # the message has to say what to change rather than dying inside torchmfbd
+    with pytest.raises(ValueError) as excinfo:
+        collect(MfbdConfig(pixel_scale_arcsec=1.0, wavelengths_nm=(550.0,)))
+    message = str(excinfo.value)
+    assert "lambda/D" in message and "barlow" in message and "0.406" in message
+
+    # the SHORTEST wavelength binds: blue fails while red alone would pass
+    with pytest.raises(ValueError, match="at 470 nm"):
+        collect(MfbdConfig(pixel_scale_arcsec=0.4, wavelengths_nm=(700.0, 530.0, 470.0)))
+
     # 0.3"/px spans it with ~1.35 px: below Nyquist but representable
     mild = collect(MfbdConfig(pixel_scale_arcsec=0.3, wavelengths_nm=(550.0,)))
     assert any(lvl == "warning" and "below Nyquist" in m for lvl, m in mild)
@@ -230,20 +238,20 @@ def test_mfbd_end_to_end(mfbd_run: MfbdRun) -> None:
         assert (run.run_dir / e["path"]).is_file()
 
     # loss history is finite and decreased
-    loss = np.load(run.run_dir / "stages/mfbd/loss_history.npy")
+    loss = np.load(run.run_dir / "examples/mfbd/loss_history.npy")
     assert loss.shape == (60,) and np.isfinite(loss).all()
     assert loss[-1] < loss[0]
 
-    # final.* comes from the deconvolution, not the lucky stack
-    final = np.load(run.run_dir / "final.npy")
+    # each producer's product stands on its own; mfbd's differs from the stack
+    deconvolved = np.load(run.run_dir / "mfbd.npy")
     lucky = tifffile.imread(
-        run.run_dir / "stages/lucky_stack/lucky_stack_p10.tif"
+        run.run_dir / "lucky_stack_p10.tif"
     ).astype(np.float32) / 65535.0
-    assert final.shape == lucky.shape == (192, 192, 3)
-    assert not np.allclose(np.clip(final, 0, 1), lucky, atol=1e-3)
+    assert deconvolved.shape == lucky.shape == (192, 192, 3)
+    assert not np.allclose(np.clip(deconvolved, 0, 1), lucky, atol=1e-3)
 
     # frame scores rank the frames the mfbd log claims to use
-    scores = np.load(run.run_dir / "stages/lucky_scoring/frame_scores.npy")
+    scores = np.load(run.run_dir / "examples/lucky_scoring/frame_scores.npy")
     assert scores.shape == (60,)
     top6 = sorted(int(i) for i in np.argsort(scores)[::-1][:6])
     log_msgs = [e["message"] for e in run.events_of("log")]
@@ -260,9 +268,9 @@ def test_mfbd_science_vs_lucky_stack(mfbd_run: MfbdRun) -> None:
     run = mfbd_run.run
     truth = np.load(TRUTH_NPY)
     tc = truth[32:224, 32:224]
-    final = np.clip(np.load(run.run_dir / "final.npy"), 0, 1)
+    deconvolved = np.clip(np.load(run.run_dir / "mfbd.npy"), 0, 1)
     lucky = tifffile.imread(
-        run.run_dir / "stages/lucky_stack/lucky_stack_p10.tif"
+        run.run_dir / "lucky_stack_p10.tif"
     ).astype(np.float32) / 65535.0
 
     def mse(a: np.ndarray) -> float:
@@ -276,8 +284,8 @@ def test_mfbd_science_vs_lucky_stack(mfbd_run: MfbdRun) -> None:
                 best = min(best, float(((np.clip(shifted, 0, 1) - tc) ** 2).mean()))
         return best
 
-    mse_deconv, mse_lucky = mse(final), mse(lucky)
-    reg_deconv, reg_lucky = registered_mse(final), registered_mse(lucky)
+    mse_deconv, mse_lucky = mse(deconvolved), mse(lucky)
+    reg_deconv, reg_lucky = registered_mse(deconvolved), registered_mse(lucky)
 
     assert np.isfinite([mse_deconv, mse_lucky, reg_deconv, reg_lucky]).all()
     assert mse_deconv >= 0 and reg_deconv >= 0
@@ -298,9 +306,6 @@ def test_mfbd_science_vs_lucky_stack(mfbd_run: MfbdRun) -> None:
 def test_mfbd_frame_selection_modes(tmp_path: Path, frames_mode: str) -> None:
     recipe = tmp_path / "r.toml"
     recipe.write_text(f"""
-[recipe]
-version = 0
-name = "modes"
 [lights]
 paths = ["{SYNTHETIC_SER.as_posix()}"]
 end_frame = 10

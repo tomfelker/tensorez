@@ -1,7 +1,3 @@
-[recipe]
-version = 0
-name = "jupiter_demo"
-
 [lights]
 paths = ["data/jupiter.ser"]
 start_frame = 0
@@ -11,6 +7,7 @@ debayer = "bilinear"
 
 [darks]
 paths = ["data/darks.ser"]
+keep_level = false
 
 [align]
 center_of_mass = true
@@ -53,5 +50,4 @@ apodization_border = 0
 frequency_cutoff = [0.2, 0.3]
 
 [output]
-dir = "output"
 debug_frames = 10

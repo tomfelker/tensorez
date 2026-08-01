@@ -72,11 +72,11 @@ export function initResults(root) {
     const sum = document.createElement('div');
     sum.className = 'results-summary';
     const items = [
-      ['recipe', m.recipe?.recipe?.name ?? '—'],
+      ['recipe', m.run?.name ?? '—'],
       ['started (UTC)', m.run?.started_utc ?? '—'],
       ['total time', m.run?.seconds != null ? m.run.seconds.toFixed(1) + ' s' : '—'],
       ['frames', m.run?.frame_count ?? '—'],
-      ['manifest version', m.manifest_version ?? '—'],
+      ['products', (m.run?.products || []).join(', ') || '—'],
       ['artifacts', (m.artifacts || []).length],
     ];
     for (const [label, value] of items) {

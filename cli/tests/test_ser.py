@@ -125,7 +125,7 @@ def test_bayer_pipeline_end_to_end(tmp_path: Path) -> None:
     path = tmp_path / "bayer.ser"
     ser.write_ser(path, np.stack(frames), ser.ColorId.BAYER_GRBG)
 
-    expected = {  # (channels, height/width) of final.npy
+    expected = {  # (channels, height/width) of the local_lucky product
         "bilinear": (3, 32),
         "superpixel_rgb": (3, 16),
         "superpixel_rggb": (4, 16),
@@ -134,9 +134,6 @@ def test_bayer_pipeline_end_to_end(tmp_path: Path) -> None:
     for debayer, (channels, size) in expected.items():
         recipe = tmp_path / f"r_{debayer}.toml"
         recipe.write_text(f"""
-[recipe]
-version = 0
-name = "bayer_{debayer}"
 [lights]
 paths = ["{path.as_posix()}"]
 debayer = "{debayer}"
@@ -151,8 +148,8 @@ debug_frames = 0
         assert proc.returncode == 0, f"{debayer}: " + proc.stdout + proc.stderr
         events = parse_events(proc.stdout)
         assert events[-1]["event"] == "done"
-        final = np.load(Path(events[0]["run_dir"]) / "final.npy")
-        assert final.shape == (size, size, channels), debayer
+        result = np.load(Path(events[0]["run_dir"]) / "local_lucky.npy")
+        assert result.shape == (size, size, channels), debayer
 
 
 def test_frame_selection(tmp_path: Path) -> None:

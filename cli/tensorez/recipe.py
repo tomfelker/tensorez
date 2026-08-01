@@ -5,19 +5,25 @@ unknown sections or keys are hard errors (they are almost always typos, and
 the GUI round-trips files it didn't write), and every value is type- and
 range-checked with a message pointing at the offending key.
 
-Relative paths resolve against the recipe file's directory.
+Relative paths — inputs and the output directory alike — resolve against the
+**current working directory**, the ordinary shell rule, so a recipe reads the
+same way whether you type its paths at a prompt or the GUI does.  The GUI runs
+the CLI with the working directory set to the recipe's own folder, which makes
+the common case ("recipe sits with the .SER files it processes") come out as
+bare filenames and results landing right there.
+
+The recipe says nothing about where run archives or the cache go: those are
+machine preferences, not part of the recipe (see cli.py's --runs-dir /
+--cache-dir), so a recipe can be moved or shared without dragging one
+machine's disk layout along.
 """
 
 from __future__ import annotations
 
-import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-RECIPE_VERSION = 0
-NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class RecipeError(ValueError):
@@ -52,6 +58,10 @@ class DarksConfig:
     start_frame: int = 0
     frame_step: int = 1
     end_frame: int | None = None
+    # Subtract only the master dark's *pattern*, adding its scalar mean back
+    # afterwards, so calibrated pixels keep their pedestal instead of
+    # scattering around zero.  Useful when the "darks" are really sky frames.
+    keep_level: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,7 +114,16 @@ class LocalLuckyConfig:
 
 @dataclass(frozen=True)
 class OutputConfig:
-    dir: str = "output"
+    """Where the products land.
+
+    ``dir`` defaults to the recipe's filename without its extension, resolved
+    like every other path against the working directory: run ``iss_pass.toml``
+    from the folder it lives in and its results appear in ``iss_pass/`` right
+    beside it, with no output configuration at all and no chance of mistaking
+    them for another recipe's.
+    """
+
+    dir: str
     debug_frames: int = 10
 
 
@@ -159,8 +178,6 @@ class MfbdConfig:
 
 @dataclass(frozen=True)
 class Recipe:
-    version: int
-    name: str
     lights: LightsConfig
     darks: DarksConfig | None
     align: AlignConfig
@@ -171,11 +188,24 @@ class Recipe:
     output: OutputConfig
     path: Path = field(compare=False, default=Path("."))
 
+    @property
+    def name(self) -> str:
+        """The run's name: the recipe file's stem.  Naming a recipe names the
+        run — there is no separate `name` key to keep in sync."""
+        return self.path.stem
+
+    @property
+    def output_dir(self) -> Path:
+        return Path(self.output.dir)
+
     def resolved_dict(self) -> dict[str, Any]:
         """The recipe as a plain dict with defaults filled in and paths
-        absolute — this is what goes into `run_start` and the manifest."""
+        absolute — this is what goes into `run_start` and the manifest.
+
+        It is a valid recipe file: every key here can be written back out and
+        re-parsed, so the GUI can round-trip it.
+        """
         d: dict[str, Any] = {
-            "recipe": {"version": self.version, "name": self.name},
             "lights": {
                 "paths": list(self.lights.paths),
                 "start_frame": self.lights.start_frame,
@@ -197,6 +227,7 @@ class Recipe:
                 "paths": list(self.darks.paths),
                 "start_frame": self.darks.start_frame,
                 "frame_step": self.darks.frame_step,
+                "keep_level": self.darks.keep_level,
             }
             if self.darks.end_frame is not None:
                 d["darks"]["end_frame"] = self.darks.end_frame
@@ -336,8 +367,9 @@ def _type_names(types: type | tuple[type, ...]) -> str:
     return " or ".join(t.__name__ for t in types)
 
 
-def _resolve_paths(paths: tuple[str, ...], base: Path) -> tuple[str, ...]:
-    return tuple(str((base / p).resolve()) if not Path(p).is_absolute() else p for p in paths)
+def _resolve_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Relative paths resolve against the working directory (see module doc)."""
+    return tuple(str(Path(p).resolve()) if not Path(p).is_absolute() else p for p in paths)
 
 
 def load_recipe(path: str | Path) -> Recipe:
@@ -351,7 +383,7 @@ def load_recipe(path: str | Path) -> Recipe:
         raise RecipeError(f"{path}: invalid TOML: {e}")
 
     known_sections = {
-        "recipe", "lights", "darks", "align",
+        "lights", "darks", "align",
         "lucky_scoring", "lucky_stack", "mfbd", "local_lucky", "output",
     }
     unknown = set(data) - known_sections
@@ -363,22 +395,8 @@ def load_recipe(path: str | Path) -> Recipe:
     for name in data:
         if not isinstance(data[name], dict):
             raise RecipeError(f"top-level key '{name}' must be a section (a TOML table)")
-    for required in ("recipe", "lights"):
-        if required not in data:
-            raise RecipeError(f"missing required section [{required}]")
-
-    base = path.resolve().parent
-
-    s = _Section("recipe", data["recipe"])
-    version = s.get_int("version", minimum=0)
-    if version is None:
-        raise RecipeError("[recipe] version: is required")
-    if version != RECIPE_VERSION:
-        raise RecipeError(f"[recipe] version: only version {RECIPE_VERSION} is supported, got {version}")
-    name = s.get("name", str, required=True)
-    if not NAME_RE.match(name):
-        raise RecipeError(f"[recipe] name: must match [A-Za-z0-9_-]+, got {name!r}")
-    s.check_no_unknown_keys()
+    if "lights" not in data:
+        raise RecipeError("missing required section [lights]")
 
     s = _Section("lights", data["lights"])
     debayer = s.get("debayer", str, "bilinear")
@@ -387,7 +405,7 @@ def load_recipe(path: str | Path) -> Recipe:
             f"[lights] debayer: must be one of {', '.join(DEBAYER_MODES)}, got {debayer!r}"
         )
     lights = LightsConfig(
-        paths=_resolve_paths(s.get_str_list("paths", required=True), base),
+        paths=_resolve_paths(s.get_str_list("paths", required=True)),
         start_frame=s.get_int("start_frame", 0, minimum=0),
         frame_step=s.get_int("frame_step", 1, minimum=1),
         end_frame=s.get_int("end_frame", None, minimum=1),
@@ -401,10 +419,11 @@ def load_recipe(path: str | Path) -> Recipe:
     if "darks" in data:
         s = _Section("darks", data["darks"])
         darks = DarksConfig(
-            paths=_resolve_paths(s.get_str_list("paths", required=True), base),
+            paths=_resolve_paths(s.get_str_list("paths", required=True)),
             start_frame=s.get_int("start_frame", 0, minimum=0),
             frame_step=s.get_int("frame_step", 1, minimum=1),
             end_frame=s.get_int("end_frame", None, minimum=1),
+            keep_level=s.get("keep_level", bool, False),
         )
         if darks.end_frame is not None and darks.end_frame <= darks.start_frame:
             raise RecipeError("[darks] end_frame: must be greater than start_frame")
@@ -597,14 +616,19 @@ def load_recipe(path: str | Path) -> Recipe:
         )
 
     s = _Section("output", data.get("output", {}))
-    out_dir = s.get("dir", str, "output")
-    if not Path(out_dir).is_absolute():
-        out_dir = str((base / out_dir).resolve())
+    # Default: a directory named after the recipe file, in the working
+    # directory — which for the intended workflow is the recipe's own folder.
+    out_dir = s.get("dir", str, None)
+    if out_dir is None:
+        out_dir = path.stem
+        if out_dir == path.name:  # extensionless recipe: don't collide with it
+            out_dir += "_output"
+    out_dir = str(Path(out_dir).resolve())
     output = OutputConfig(dir=out_dir, debug_frames=s.get_int("debug_frames", 10, minimum=0))
     s.check_no_unknown_keys()
 
     return Recipe(
-        version=version, name=name, lights=lights, darks=darks, align=align,
+        lights=lights, darks=darks, align=align,
         lucky_scoring=lucky_scoring, lucky_stack=lucky_stack, mfbd=mfbd,
         local_lucky=local_lucky, output=output, path=path.resolve(),
     )

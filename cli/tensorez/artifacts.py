@@ -26,7 +26,7 @@ def _to_hwc(image: torch.Tensor) -> torch.Tensor:
 
 def _display_channels(image: torch.Tensor) -> torch.Tensor:
     """4-channel superpixel (R, G1, G2, B) images collapse to RGB for the
-    displayable formats (preview PNG, TIFF); final.npy keeps all 4 exact."""
+    displayable formats (preview PNG, TIFF); the .npy keeps all 4 exact."""
     if image.shape[-3] == 4:
         r, g1, g2, b = image.unbind(dim=-3)
         image = torch.stack([r, (g1 + g2) / 2, b], dim=-3)

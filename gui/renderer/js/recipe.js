@@ -1,7 +1,17 @@
 // Recipe editor: schema-generated form <-> raw TOML pane, two-way sync.
+//
+// Document model, like any editor: the recipe you are editing is always
+// backed by a real file, because the CLI can only run a file. A recipe you
+// haven't saved anywhere lives in a scratch file in the user's profile
+// directory (bridge.appPaths().scratchRecipe) and is written on every edit;
+// Save As moves it somewhere you care about — beside the .ser files, ideally,
+// since that is where its results will land — after which Save writes there.
+// The last-opened path is remembered in the settings file next to the scratch
+// recipe, so reopening the app returns you to what you were working on.
 
 import { parse as parseToml, stringify as stringifyToml } from '../vendor/index.js';
 import { SCHEMA, defaultRecipe, validateRecipe, hydrate } from './schema.js';
+import { loadSettings, updateSettings } from './settings.js';
 
 const SQRT2 = Math.SQRT2;
 
@@ -25,30 +35,39 @@ function canonicalize(obj) {
   return out;
 }
 
-export function initRecipe(root) {
+export async function initRecipe(root) {
   let state = defaultRecipe();
-  let currentPath = null;
-  let tomlDirty = false; // textarea is the source of truth while it has errors
+  let currentPath = null;   // always a real file once boot() has run
+  let scratchPath = null;   // …which is this one until the user saves elsewhere
+  let unsaved = false;      // editor content differs from the file on disk
+  let loading = false;      // suppress "unsaved" while adopting a file's content
+  let tomlDirty = false;    // textarea is the source of truth while it has errors
 
   root.innerHTML = `
     <h1>Recipe</h1>
-    <p class="view-sub">Author a <span class="mono">recipe.toml</span> for the tensorez pipeline.
-      Edit the form or the raw TOML — they stay in sync.</p>
+    <p class="view-sub">Describe what to process and how. Save it beside your capture
+      files — the recipe names the run, and its results land next to it.</p>
     <div class="toolbar">
       <button id="rc-new">New</button>
       <button id="rc-open">Open…</button>
-      <button id="rc-save" class="primary">Save</button>
+      <button id="rc-save">Save</button>
+      <button id="rc-saveas">Save As…</button>
+      <div class="sep"></div>
+      <button id="rc-run" class="primary" title="saves, then runs this recipe">▶ Run</button>
       <div class="sep"></div>
       <div id="rc-path" class="file-label">unsaved recipe</div>
     </div>
-    <div class="recipe-layout">
-      <div class="recipe-form" id="rc-form"></div>
+    <!-- Problems stay out here: the TOML pane below is collapsed by default,
+         and a validation error you can't see is worse than useless. -->
+    <div id="rc-toml-error" class="toml-error"></div>
+    <div class="recipe-form" id="rc-form"></div>
+    <details class="toml-details" id="rc-toml-details">
+      <summary>Raw TOML<span class="dim"> — this is the whole recipe; the form above
+        just edits it</span></summary>
       <div class="toml-pane">
-        <div class="pane-title">raw toml</div>
         <textarea id="rc-toml" spellcheck="false" aria-label="raw toml"></textarea>
-        <div id="rc-toml-error" class="toml-error"></div>
       </div>
-    </div>`;
+    </details>`;
 
   const formEl = root.querySelector('#rc-form');
   const tomlEl = root.querySelector('#rc-toml');
@@ -74,6 +93,7 @@ export function initRecipe(root) {
     // surface those live so the user learns before the CLI hard-errors
     const problems = validateRecipe(state);
     setError(problems.length ? 'Recipe validation:\n• ' + problems.join('\n• ') : null);
+    if (!loading) markUnsaved();
   }
 
   function stateChanged({ rerender = false } = {}) {
@@ -527,6 +547,7 @@ export function initRecipe(root) {
   let debounce = null;
   tomlEl.addEventListener('input', () => {
     tomlDirty = true;
+    markUnsaved();
     clearTimeout(debounce);
     debounce = setTimeout(applyTomlPane, 300);
   });
@@ -550,56 +571,159 @@ export function initRecipe(root) {
     renderForm();
   }
 
-  // ---------- toolbar ----------
+  // ---------- the document ----------
+
+  function baseName(p) {
+    return String(p).split(/[\\/]/).pop();
+  }
 
   function setPath(p) {
     currentPath = p;
-    pathEl.textContent = p || 'unsaved recipe';
-    pathEl.title = p || '';
+    const scratch = p != null && p === scratchPath;
+    const label = p == null ? 'unsaved recipe' : scratch ? 'untitled' : baseName(p);
+    pathEl.textContent = label + (unsaved && p != null ? ' •' : '');
+    pathEl.title = scratch ? `unsaved — scratch copy kept in ${p}` : (p || '');
+    pathEl.dataset.path = p || '';
+    pathEl.dataset.scratch = scratch ? '1' : '';
   }
 
-  root.querySelector('#rc-new').addEventListener('click', () => {
+  function markUnsaved() {
+    if (!unsaved) { unsaved = true; setPath(currentPath); }
+    // The scratch file isn't a document the user chose, so keep it current
+    // rather than nagging: it exists purely so an "unsaved" recipe can run.
+    if (currentPath && currentPath === scratchPath) scheduleScratchSave();
+  }
+
+  let scratchTimer = null;
+  function scheduleScratchSave() {
+    clearTimeout(scratchTimer);
+    scratchTimer = setTimeout(() => { save().catch(() => {}); }, 400);
+  }
+
+  async function save() {
+    if (!currentPath) return false;
+    await window.bridge.writeTextFile(currentPath, tomlEl.value);
+    unsaved = false;
+    setPath(currentPath);
+    return true;
+  }
+
+  async function saveReporting() {
+    try {
+      return await save();
+    } catch (e) {
+      setError(`Could not save to ${currentPath}:\n${e.message || e}`);
+      return false;
+    }
+  }
+
+  function loadText(text, { warn = true } = {}) {
+    const parsed = parseToml(text);
+    const problems = validateRecipe(parsed);
+    loading = true;
+    try {
+      state = canonicalize(hydrate(parsed));
+      stateChanged({ rerender: true });
+    } finally {
+      loading = false;
+    }
+    if (warn && problems.length) setError('Loaded with warnings:\n• ' + problems.join('\n• '));
+  }
+
+  async function openPath(p) {
+    const text = await window.bridge.readTextFile(p);
+    loadText(text);
+    unsaved = false;
+    setPath(p);
+    await updateSettings({ lastRecipePath: p });
+  }
+
+  // ---------- toolbar ----------
+
+  root.querySelector('#rc-new').addEventListener('click', async () => {
     state = defaultRecipe();
-    setPath(null);
+    unsaved = false;
+    setPath(scratchPath);
     stateChanged({ rerender: true });
+    if (await saveReporting()) await updateSettings({ lastRecipePath: scratchPath });
   });
 
   root.querySelector('#rc-open').addEventListener('click', async () => {
     const p = await window.bridge.openFileDialog({
       title: 'Open recipe',
       filters: [{ name: 'TOML recipe', extensions: ['toml'] }],
+      defaultPath: currentPath === scratchPath ? undefined : currentPath,
     });
     if (!p) return;
     try {
-      const text = await window.bridge.readTextFile(p);
-      const parsed = parseToml(text);
-      const problems = validateRecipe(parsed);
-      state = canonicalize(hydrate(parsed));
-      setPath(p);
-      stateChanged({ rerender: true });
-      if (problems.length) setError('Loaded with warnings:\n• ' + problems.join('\n• '));
+      await openPath(p);
     } catch (e) {
       setError(`Could not open ${p}:\n${e.message || e}`);
     }
   });
 
-  root.querySelector('#rc-save').addEventListener('click', async () => {
-    let p = currentPath;
-    if (!p) {
-      p = await window.bridge.saveFileDialog({
-        title: 'Save recipe',
-        defaultPath: (state.recipe?.name || 'recipe') + '.toml',
-        filters: [{ name: 'TOML recipe', extensions: ['toml'] }],
-      });
-      if (!p) return;
-    }
-    await window.bridge.writeTextFile(p, tomlEl.value);
+  root.querySelector('#rc-save').addEventListener('click', () => saveReporting());
+
+  root.querySelector('#rc-saveas').addEventListener('click', async () => {
+    // Default next to the lights: that's where the results will land, and it
+    // makes the recipe's own paths short and relative.
+    const lights = state.lights?.paths?.[0] || '';
+    const dir = lights.includes('/') || lights.includes('\\')
+      ? lights.slice(0, Math.max(lights.lastIndexOf('/'), lights.lastIndexOf('\\')) + 1)
+      : '';
+    const p = await window.bridge.saveFileDialog({
+      title: 'Save recipe as',
+      defaultPath: dir + 'my_recipe.toml',
+      filters: [{ name: 'TOML recipe', extensions: ['toml'] }],
+    });
+    if (!p) return;
     setPath(p);
+    if (await saveReporting()) await updateSettings({ lastRecipePath: p });
   });
 
-  // initial paint
+  root.querySelector('#rc-run').addEventListener('click', async () => {
+    if (!(await saveReporting())) return; // the CLI runs the file, not the editor
+    window.dispatchEvent(new CustomEvent('tensorez:navigate', {
+      detail: { view: 'run', recipePath: currentPath, autostart: true },
+    }));
+  });
+
+  // ---------- boot ----------
+
+  async function boot() {
+    const { paths, values } = await loadSettings();
+    if (paths) scratchPath = paths.scratchRecipe;
+
+    // Reopen what was last worked on; fall back to the scratch recipe, and
+    // create it from defaults the very first time.
+    const candidates = [values.lastRecipePath, scratchPath].filter(Boolean);
+    for (const p of candidates) {
+      try {
+        if (!(await window.bridge.exists(p))) continue;
+        await openPath(p);
+        return;
+      } catch { /* unreadable or unparseable: try the next */ }
+    }
+    setPath(scratchPath);
+    stateChanged({ rerender: true });
+    if (!scratchPath) return;
+    try {
+      await save();
+      await updateSettings({ lastRecipePath: scratchPath });
+    } catch (e) {
+      // an unwritable profile directory shouldn't take the whole app down
+      setError(`Could not write the scratch recipe to ${scratchPath}:\n${e.message || e}`);
+    }
+  }
+
+  // initial paint, then adopt whatever the profile directory holds
   renderForm();
   syncTomlFromState();
+  try {
+    await boot();
+  } catch (e) {
+    setError(`Could not restore the last recipe:\n${e.message || e}`);
+  }
 
   // debug/testing hooks
   window.__tensorez = window.__tensorez || {};

@@ -43,9 +43,6 @@ def _channel_centroids(image_hwc: np.ndarray) -> np.ndarray:
 def _recipe(tmp_path: Path, ser_path: Path, per_channel: bool) -> Path:
     p = tmp_path / f"r_{per_channel}.toml"
     p.write_text(f"""
-[recipe]
-version = 0
-name = "disp{int(per_channel)}"
 [lights]
 paths = ["{ser_path.as_posix()}"]
 [align]
@@ -71,7 +68,7 @@ def test_per_channel_removes_dispersion(tmp_path: Path) -> None:
         runs[per_channel] = CliRun(proc, parse_events(proc.stdout), 0.0)
 
     def spread(run: CliRun) -> float:
-        avg = np.load(run.run_dir / "stages/local_lucky/unweighted_average.npy")
+        avg = np.load(run.run_dir / "examples/local_lucky/unweighted_average.npy")
         cent = _channel_centroids(avg)
         return float(np.linalg.norm(cent - cent.mean(axis=0), axis=1).max())
 
@@ -87,9 +84,6 @@ def test_per_channel_removes_dispersion(tmp_path: Path) -> None:
 
 def test_per_channel_recipe_conflicts(tmp_path: Path) -> None:
     base = """
-[recipe]
-version = 0
-name = "t"
 [lights]
 paths = ["x.ser"]
 """
@@ -110,9 +104,6 @@ def test_per_channel_mono_is_noop(tmp_path: Path) -> None:
     ser.write_ser(ser_path, frames, ser.ColorId.MONO)
     recipe = tmp_path / "r.toml"
     recipe.write_text(f"""
-[recipe]
-version = 0
-name = "mono"
 [lights]
 paths = ["{ser_path.as_posix()}"]
 [align]

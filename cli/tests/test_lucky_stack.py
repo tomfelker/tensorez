@@ -15,9 +15,6 @@ from tensorez.scoring import FrameScorer, ScoringParams
 def _recipe(tmp_path: Path) -> Path:
     p = tmp_path / "r.toml"
     p.write_text(f"""
-[recipe]
-version = 0
-name = "scorestack"
 [lights]
 paths = ["{SYNTHETIC_SER.as_posix()}"]
 end_frame = 20
@@ -42,20 +39,27 @@ def test_scoring_and_stack_end_to_end(tmp_path: Path) -> None:
     stages = [e["stage"] for e in run.events_of("stage_start")]
     assert stages == ["lights", "align", "lucky_scoring", "lucky_stack", "output"]
 
-    scores = np.load(run.run_dir / "stages/lucky_scoring/frame_scores.npy")
+    scores = np.load(run.run_dir / "examples/lucky_scoring/frame_scores.npy")
     assert scores.shape == (20,) and np.isfinite(scores).all()
 
     # 0.05 of 20 frames -> ceil = 1 (the single best frame); 1.0 -> all 20
-    p5 = tifffile.imread(run.run_dir / "stages/lucky_stack/lucky_stack_p5.tif")
-    p100 = tifffile.imread(run.run_dir / "stages/lucky_stack/lucky_stack_p100.tif")
+    p5 = tifffile.imread(run.run_dir / "lucky_stack_p5.tif")
+    p100 = tifffile.imread(run.run_dir / "lucky_stack_p100.tif")
     assert p5.shape == p100.shape == (128, 128, 3)
     logs = [e["message"] for e in run.events_of("log")]
     assert any("lucky_stack_p5 = best 1 of 20" in m for m in logs)
     assert any("lucky_stack_p100 = best 20 of 20" in m for m in logs)
 
-    # final.* is the FIRST-listed fraction (no fancier producer enabled)
-    final = tifffile.imread(run.run_dir / "final.tif")
-    assert np.array_equal(final, p5)
+    # one product per fraction, each named for it, all three formats, and
+    # copied out of the run dir into the output dir
+    done = run.events_of("done")[0]
+    assert done["products"] == ["lucky_stack_p5", "lucky_stack_p100"]
+    out_dir = Path(done["output_dir"])
+    for name in done["products"]:
+        for suffix in (".npy", ".tif", ".png"):
+            assert (run.run_dir / (name + suffix)).is_file(), name + suffix
+            assert (out_dir / (name + suffix)).is_file(), name + suffix
+    assert np.array_equal(tifffile.imread(out_dir / "lucky_stack_p5.tif"), p5)
 
     # the best single frame out-scores the mean of everything on the same
     # metric — the point of lucky imaging
@@ -71,8 +75,11 @@ def test_scoring_and_stack_end_to_end(tmp_path: Path) -> None:
     assert scoring2["cached"] is True
     assert not [e for e in run2.events_of("progress") if e["stage"] == "lucky_scoring"]
     assert np.array_equal(
-        scores, np.load(run2.run_dir / "stages/lucky_scoring/frame_scores.npy")
+        scores, np.load(run2.run_dir / "examples/lucky_scoring/frame_scores.npy")
     )
+    # ...and the second run's products overwrote the first's in the output dir
+    assert run2.run_dir != run.run_dir
+    assert Path(run2.events_of("done")[0]["output_dir"]) == out_dir
 
 
 def test_image_squared_metric_prefers_sharp() -> None:

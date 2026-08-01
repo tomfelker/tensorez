@@ -1,9 +1,11 @@
 # Real-data smoke test: 100 PNG frames of Jupiter (512x512, ~350px planet),
-# captured as MVI_6906.  Paths resolve relative to this file.
-
-[recipe]
-version = 0
-name = "jupiter_mvi_6906"
+# captured as MVI_6906.
+#
+# Run it from this directory — paths resolve against the working directory:
+#     cd cli/examples && python -m tensorez run jupiter.toml
+# With no [output] dir, results land in "jupiter/" right here; past runs go
+# to tensorez_runs/jupiter/ and the stage cache to tensorez_cache/, both of
+# which --runs-dir / --cache-dir can move elsewhere.
 
 [lights]
 paths = ["../../data/jupiter_mvi_6906/????????.png"]
@@ -24,7 +26,7 @@ max_wavelength_pixels = 50.0
 [lucky_stack]
 top_fractions = [0.1, 0.5]
 
-# Per-pixel lucky stacking (best for extended scenes; final.* when no [mfbd]).
+# Per-pixel lucky stacking (best for extended scenes) -> local_lucky.{npy,tif,png}
 [local_lucky]
 noise_wavelength_pixels = 2.0
 crossover_wavelength_pixels = 30.0
@@ -52,5 +54,4 @@ steepness = 3.0
 # iterations = 100
 
 [output]
-dir = "../output"
 debug_frames = 5
