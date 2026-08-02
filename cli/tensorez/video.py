@@ -155,7 +155,7 @@ def _open(path: str, size: int, mtime_ns: int):
     del size, mtime_ns  # part of the cache key only
     VideoDecoder = _video_decoder_class()
     try:
-        decoder = VideoDecoder(path, seek_mode="exact", output_dtype=torch.uint8)
+        decoder = VideoDecoder(path, seek_mode="exact", output_dtype="auto")
     except VideoSupportError:
         raise
     except Exception as e:
@@ -185,19 +185,33 @@ def frame_count(path: str | Path) -> int:
     return int(count)
 
 
-def read_frame(path: str | Path, frame_index: int) -> torch.Tensor:
-    """Read one frame as float32 linear light, (1, C, H, W).
+def _to_unit_range(frame: torch.Tensor, path: str) -> torch.Tensor:
+    """Scale a decoded frame to float32 in [0, 1], whatever depth it came at.
 
-    Decoded as uint8 and scaled here rather than asking torchcodec for
-    float32 output: its float conversion normalizes by about 256 rather than
-    255 (level 160 arrives as 0.62501 instead of 0.62745, and white never
-    quite reaches 1.0).  Dividing the exact byte by 255 ourselves makes a
-    video frame identical to a still of the same 8-bit value, which is the
-    whole point of routing both through the same sRGB curve.  The cost is
-    that sources deeper than 8 bits are reduced to 8 on the way in.
+    ``output_dtype="auto"`` hands back the narrowest type that holds the
+    source: uint8 for ordinary 8-bit video, float32 for anything deeper.  We
+    take that rather than always asking for float32 because torchcodec's
+    *8-bit* float conversion is lossy in a way worth avoiding -- it promotes
+    the byte with a shift and divides by 65535, i.e. v*256/65535 instead of
+    v/255, which is 0.39% low and never quite reaches white.  Dividing the
+    exact byte ourselves keeps a video frame identical to a still of the same
+    value.  Deeper sources have no such problem: measured against a 10-bit
+    source, float32 output is v/1023 to within 4e-6, so it passes through
+    untouched and nothing is truncated to 8 bits.
     """
+    if frame.dtype == torch.uint8:
+        return frame.float() / 255.0
+    if frame.dtype == torch.uint16:
+        return frame.float() / 65535.0
+    if frame.dtype.is_floating_point:
+        return frame.float()  # already normalized to [0, 1]
+    raise ValueError(f"{path}: unexpected decoded frame dtype {frame.dtype}")
+
+
+def read_frame(path: str | Path, frame_index: int) -> torch.Tensor:
+    """Read one frame as float32 linear light, (1, C, H, W)."""
     decoder = _decoder(path)
-    frame = decoder[frame_index]  # (C, H, W) uint8, already RGB
+    frame = decoder[frame_index]  # (C, H, W), already RGB, depth per the source
     if _is_mono(decoder.metadata):
         frame = frame[:1]  # grayscale decodes to three identical channels
-    return srgb_to_linear(frame.float() / 255.0).unsqueeze(0).contiguous()
+    return srgb_to_linear(_to_unit_range(frame, str(path))).unsqueeze(0).contiguous()

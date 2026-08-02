@@ -70,10 +70,13 @@ overrides the search when a shell's PATH is stale.
   on PATH still fails: `video.py` must call `os.add_dll_directory` on the
   library directory *before* importing torchcodec. Symptom of getting this
   wrong is a bare `Could not load this library: libtorchcodec_core4.dll`.
-- **Don't ask torchcodec for float32 frames.** Its float conversion normalizes
-  by ~256, not 255 (level 160 → 0.62501, white never reaching 1.0). `video.py`
-  decodes uint8 and divides by 255 itself so a video frame matches a still of
-  the same value exactly. Verified in `test_lossless_video_decodes_exactly`.
+- **torchcodec's 8-bit float conversion is lossy; its deeper ones are fine.**
+  Asking for float32 on an 8-bit source gives `v*256/65535`, not `v/255` — 0.39%
+  low, white never reaching 1.0. At 10 bits it's `v/1023` to within 4e-6. So
+  `video.py` asks for `output_dtype="auto"`: uint8 for 8-bit, which it scales by
+  255 itself, float32 for anything deeper, passed straight through. Don't
+  "simplify" that to a single dtype. Covered by
+  `test_lossless_video_decodes_exactly` and `test_ten_bit_video_keeps_its_depth`.
 - **Recipe paths resolve against the cwd**, not the recipe's directory (the
   GUI spawns the CLI with cwd = the recipe's folder). The recipe file names
   everything: there is no `[recipe]` section at all, and products default to

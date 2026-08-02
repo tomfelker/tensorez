@@ -99,6 +99,27 @@ def write_video(path: Path, frames: np.ndarray, codec: str = "rawvideo",
     return path
 
 
+def write_video_10bit(path: Path, levels: list[int], size: int = 8, fps: int = 5) -> Path:
+    """Write a 10-bit video whose frame i is a flat field of ``levels[i]``.
+
+    Fed as gbrp10le -- planar G, B, R in 16-bit containers -- so the exact
+    10-bit levels reach the encoder without an intermediate promotion, and
+    lossless ffv1 brings them back.  ffv1 is a native LGPL encoder, so this
+    works with the plain shared FFmpeg build (x264/x265 would not).
+    """
+    exe = ffmpeg_exe()
+    assert exe is not None, "write_video_10bit requires ffmpeg"
+    planes = np.stack([np.full((3, size, size), v, np.uint16) for v in levels])
+    subprocess.run(
+        [exe, "-y", "-loglevel", "error",
+         "-f", "rawvideo", "-pix_fmt", "gbrp10le",
+         "-s", f"{size}x{size}", "-r", str(fps), "-i", "-",
+         "-c:v", "ffv1", "-pix_fmt", "gbrp10le", str(path)],
+        input=planes.tobytes(), check=True, capture_output=True,
+    )
+    return path
+
+
 def run_cli(args: list[str], cwd: Path, events: bool = True) -> subprocess.CompletedProcess[str]:
     """Invoke the CLI.  Tests parse the JSONL event stream, so --events is
     added unless a test is specifically checking the human-readable default."""

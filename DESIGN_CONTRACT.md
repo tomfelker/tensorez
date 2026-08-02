@@ -345,11 +345,12 @@ and height (crop sizes and all *_pixels tunings are in output pixels).
 and preview `.png`; the `.npy` keeps the exact channels.
 
 Video frames arrive already demosaiced and lossily compressed, so `debayer`
-never applies to them and no mosaic can be recovered. They are decoded to
-8-bit RGB and divided by 255 before the same sRGB → linear curve the stills
-take, which makes a video frame numerically identical to a still of the same
-value: BT.709, which consumer video declares, shares sRGB's primaries and
-white point, so this is the canonical inverse rather than an approximation.
-Sources deeper than 8 bits are reduced to 8 on the way in, and HDR transfer
-functions (PQ, HLG) are linearized as if they were sRGB — wrong, and warned
-about. A grayscale video decodes as 1 channel, not 3 identical ones.
+never applies to them and no mosaic can be recovered. They are decoded at
+their native depth, scaled to [0, 1], and put through the same sRGB → linear
+curve the stills take: BT.709, which consumer video declares, shares sRGB's
+primaries and white point, so this is the canonical inverse rather than an
+approximation, and an 8-bit video frame is numerically identical to a still of
+the same value. Depth is preserved — a 10-bit source keeps its 1024 levels.
+HDR transfer functions (PQ, HLG) are the one gap: they are linearized as if
+they were sRGB, which is wrong, and warned about. A grayscale video decodes as
+1 channel, not 3 identical ones.

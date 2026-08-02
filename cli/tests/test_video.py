@@ -21,6 +21,7 @@ from conftest import (
     requires_video,
     run_cli,
     write_video,
+    write_video_10bit,
 )
 from tensorez import video
 from tensorez.color import srgb_to_linear
@@ -68,6 +69,31 @@ def test_random_access_is_frame_accurate_on_an_inter_coded_file(tmp_path: Path) 
     in_order = [seq[i].clone() for i in range(len(seq))]
     for i in (9, 2, 15):
         assert torch.equal(seq[i], in_order[i])
+
+
+@requires_video
+def test_ten_bit_video_keeps_its_depth(tmp_path: Path) -> None:
+    """A 10-bit source must not be squashed to 8 on the way in.
+
+    Levels one 10-bit step apart straddling an 8-bit boundary would collide if
+    anything truncated; they have to stay ordered and distinct.  The absolute
+    values come back as v/1023 because torchcodec normalizes deeper sources
+    correctly -- unlike its 8-bit float path, which is why read_frame scales
+    bytes itself (see video._to_unit_range).
+    """
+    levels = [0, 1, 600, 601, 1000, 1023]
+    path = write_video_10bit(tmp_path / "deep.mkv", levels)
+    seq = ImageSequence([str(path)])
+    assert len(seq) == len(levels)
+
+    decoded = [float(seq[i][0, 0, 0, 0]) for i in range(len(levels))]
+    for i, level in enumerate(levels):
+        expected = float(srgb_to_linear(torch.tensor(level / 1023.0)))
+        assert decoded[i] == pytest.approx(expected, rel=1e-4, abs=1e-7), level
+
+    # the pair that 8-bit truncation would merge (600 and 601 both -> 150/255)
+    assert decoded[3] > decoded[2]
+    assert decoded[1] > decoded[0]
 
 
 @requires_video
