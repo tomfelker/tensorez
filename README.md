@@ -84,6 +84,8 @@ npx playwright install chromium
 npm test
 ```
 
+The last of them launches the real Electron app to check the main process, so a window appears briefly — that's expected. It uses a throwaway profile and won't touch a recipe you have open.
+
 Using
 ==
 The CLI takes a recipe `.toml` describing your input files and processing options (see `cli/examples/` for real ones, and DESIGN_CONTRACT.md for every key).

@@ -22,7 +22,7 @@
     "smol-toml": "^1.7.1"
   },
   "devDependencies": {
-    "electron": "^33.4.11",
+    "electron": "^43.2.0",
     "playwright": "^1.56.0"
   }
 }

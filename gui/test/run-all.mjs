@@ -10,6 +10,9 @@ const TESTS = [
   ['ser', () => import('./ser.test.mjs')],
   ['real', () => import('./real.test.mjs')],
   ['mfbd', () => import('./mfbd.test.mjs')],
+  // last: the only suite that launches real Electron rather than the mock
+  // bridge, and the only one that puts a window on screen
+  ['electron', () => import('./electron.test.mjs')],
 ];
 
 const filter = process.argv[2];

@@ -44,6 +44,13 @@ overrides the search when a shell's PATH is stale.
   output lands in `cli/examples/{<recipe stem>,tensorez_runs,tensorez_cache}/`,
   all gitignored. They fail with a "run the CLI first" message otherwise.
 - GUI tests rewrite `gui/screenshots/` on every run — untracked on purpose.
+- **Only the `electron` suite runs Electron.** Every other GUI test drives the
+  renderer in plain Chromium against the mock bridge, so `main.js`/`preload.js`
+  can break without any of them noticing — that suite is the only thing
+  covering them, which is what makes an Electron upgrade verifiable. It
+  launches the real app (a window appears for a few seconds; Electron has no
+  headless mode) under a throwaway `--user-data-dir`, so it can't clobber the
+  scratch recipe of a GUI you have open.
 - `test_video.py` generates its fixtures by piping raw frames through the
   `ffmpeg` binary, so it skips (with the reason) when FFmpeg or torchcodec is
   missing. Three of its tests cover the degraded path and always run.
