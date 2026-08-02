@@ -17,6 +17,12 @@ dependencies = [
 [project.optional-dependencies]
 # The [deconv] recipe stage (multi-frame blind deconvolution).
 deconv = ["torchmfbd", "scipy"]
+# Reading MP4/AVI/MOV inputs.  torchcodec loads the system's FFmpeg shared
+# libraries (majors 4-8) rather than bundling them, so this extra alone is not
+# enough -- see README.md for the FFmpeg install, which must be a *shared*
+# build.  Without both, video inputs fail with an actionable error and every
+# other input format keeps working.
+video = ["torchcodec"]
 dev = ["pytest"]
 
 [project.scripts]

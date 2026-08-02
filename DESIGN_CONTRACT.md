@@ -44,7 +44,10 @@ from the same place.
 ```toml
 [lights]
 # One or more paths/globs, concatenated in order. .ser (MONO / RGB / BAYER_RGGB /
-# BAYER_GRBG), or globs of stills (.png, .tif, .jpg — decoded to linear light).
+# BAYER_GRBG), globs of stills (.png, .tif, .jpg), or videos (.mp4, .avi, .mov,
+# .mkv, …) — all decoded to linear light. Video needs the optional [video] extra
+# plus FFmpeg's shared libraries; without them a video input is a clean error and
+# every other format still works.
 paths = ["data/jupiter.ser"]
 start_frame = 0              # inclusive, default 0
 frame_step = 1               # default 1
@@ -319,6 +322,15 @@ tensorez dev branch, with file identity added to the key.
   pixels: alignment (mean-relative) and the luckiness/scoring bands (DC-free)
   are unaffected, `.npy` preserves them, and `.tif`/`.png` clip them to black.
   The `align` stage logs what fraction of frame 0 went negative.
+- **Video inputs (additive).** `[lights] paths` and `[darks] paths` accept
+  MP4/AVI/MOV/MKV alongside `.ser` and stills, decoded by torchcodec with
+  frame-accurate indexing (`seek_mode="exact"`, so frame *i* is frame *i* even
+  on a long-GOP file rather than the nearest keyframe). There is no recipe key
+  for this: a video is just another path. Support is optional in both halves —
+  the `[video]` pip extra and FFmpeg's shared libraries, which torchcodec loads
+  rather than bundles — and when either is absent a video path fails as an
+  ordinary bad-input error naming both remedies, while SER and stills are
+  unaffected. See §4 for how video pixels are interpreted.
 
 ## 4. Pixel conventions
 
@@ -331,3 +343,13 @@ debayered on read per `[lights] debayer`; the superpixel modes halve width
 and height (crop sizes and all *_pixels tunings are in output pixels).
 4-channel results collapse to RGB (greens averaged) in every product `.tif`
 and preview `.png`; the `.npy` keeps the exact channels.
+
+Video frames arrive already demosaiced and lossily compressed, so `debayer`
+never applies to them and no mosaic can be recovered. They are decoded to
+8-bit RGB and divided by 255 before the same sRGB → linear curve the stills
+take, which makes a video frame numerically identical to a still of the same
+value: BT.709, which consumer video declares, shares sRGB's primaries and
+white point, so this is the canonical inverse rather than an approximation.
+Sources deeper than 8 bits are reduced to 8 on the way in, and HDR transfer
+functions (PQ, HLG) are linearized as if they were sRGB — wrong, and warned
+about. A grayscale video decodes as 1 channel, not 3 identical ones.

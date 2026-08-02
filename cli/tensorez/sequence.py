@@ -1,5 +1,5 @@
-"""Image sequences: a list of files (SER videos and/or stills) seen as one
-flat, frame-steppable sequence.
+"""Image sequences: a list of files (SER videos, compressed videos, and/or
+stills) seen as one flat, frame-steppable sequence.
 
 Terminology kept from the reference implementation:
 
@@ -11,7 +11,8 @@ Frames are returned as float32 linear-light torch tensors of shape
 (1, C, H, W).  8-bit stills are assumed sRGB-encoded and are linearized;
 16-bit sources are assumed linear.  Bayer SER files are debayered on read
 according to the sequence's ``debayer`` mode (see bayer.py); the mode is
-ignored for non-Bayer sources.
+ignored for non-Bayer sources, which includes every MP4/AVI (see video.py --
+those arrive already demosaiced, and are linearized as sRGB).
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from . import ser
+from . import ser, video
 from .bayer import DEBAYER_MODES, demosaic, is_supported_bayer, superpixel_rgb, superpixel_rggb
 from .color import srgb_to_linear
 
@@ -87,7 +88,7 @@ def read_ser_frame(path: str, frame_index: int, debayer: str = "bilinear") -> to
 
 
 class ImageSequence:
-    """A frame-addressable view over globs of SER files and stills."""
+    """A frame-addressable view over globs of SER files, videos, and stills."""
 
     def __init__(
         self,
@@ -139,17 +140,28 @@ class ImageSequence:
                     f"(supported: MONO, RGB, BAYER_RGGB, BAYER_GRBG)"
                 )
             return header.frame_count
+        if video.is_video(filename):
+            return video.frame_count(filename)
         ext = os.path.splitext(filename)[1].lower()
         if ext not in STILL_EXTENSIONS:
-            raise ValueError(f"{filename}: unsupported file type {ext!r}")
+            raise ValueError(
+                f"{filename}: unsupported file type {ext!r} (expected .ser, a still "
+                f"image, or a video: {', '.join(sorted(video.VIDEO_EXTENSIONS))})"
+            )
         return 1
 
     @property
     def color_id(self) -> ser.ColorId:
-        """Color layout of the first file (stills count as RGB)."""
+        """Color layout of the first file (stills count as RGB).
+
+        Videos arrive demosaiced, so they are never Bayer; grayscale ones are
+        reported as MONO so the pipeline treats them as single-channel.
+        """
         filename = self.files[0][0]
         if _is_ser(filename):
             return ser.ColorId(ser.read_header(filename).color_id)
+        if video.is_video(filename):
+            return ser.ColorId.MONO if video.is_mono(filename) else ser.ColorId.RGB
         return ser.ColorId.RGB
 
     @property
@@ -188,6 +200,8 @@ class ImageSequence:
         filename, frame_index = self._raw_to_file(raw_index)
         if _is_ser(filename):
             return read_ser_frame(filename, frame_index, self.debayer)
+        if video.is_video(filename):
+            return video.read_frame(filename, frame_index)
         return read_still(filename)
 
     def __len__(self) -> int:

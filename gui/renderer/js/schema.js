@@ -23,14 +23,27 @@
 // defaults — real CLI-authored recipes are sparse); hydrate() fills them in
 // for form display.
 
+// Browse filters for [lights]/[darks] paths, mirroring what the CLI's
+// ImageSequence accepts. Video needs the CLI's optional [video] extra plus
+// FFmpeg; the dialog offers it regardless, and the CLI explains itself if the
+// pieces are missing. "All supported" comes first so it is the default.
+const INPUT_FILTERS = [
+  { name: 'All supported', extensions: ['ser', 'mp4', 'avi', 'mov', 'mkv', 'm4v', 'webm', 'png', 'tif', 'tiff', 'jpg', 'jpeg'] },
+  { name: 'SER', extensions: ['ser'] },
+  { name: 'Video', extensions: ['mp4', 'avi', 'mov', 'mkv', 'm4v', 'webm', 'mpg', 'mpeg', 'wmv'] },
+  { name: 'Stills', extensions: ['png', 'tif', 'tiff', 'jpg', 'jpeg'] },
+];
+
 export const SCHEMA = [
   {
     section: 'lights',
     label: 'Lights',
-    help: 'Input frames: .ser video or globs of stills, concatenated in order.',
+    help: 'Input frames: .ser, compressed video (.mp4/.avi/…), or globs of stills, ' +
+      'concatenated in order. SER keeps the raw sensor data, so it is the one worth ' +
+      'capturing in; video arrives already demosaiced and lossily compressed.',
     fields: [
       { key: 'paths', type: 'paths', default: ['data/lights.ser'], pathKind: 'file',
-        filters: [{ name: 'SER / stills', extensions: ['ser', 'png', 'tif', 'jpg'] }] },
+        filters: INPUT_FILTERS },
       { key: 'start_frame', type: 'int', default: 0, min: 0, help: 'inclusive' },
       { key: 'frame_step', type: 'int', default: 1, min: 1 },
       { key: 'end_frame', type: 'int', optional: true, default: 300, min: 1,
@@ -52,7 +65,7 @@ export const SCHEMA = [
       '(e.g. the empty sky before/after an ISS pass).',
     fields: [
       { key: 'paths', type: 'paths', default: ['data/darks.ser'], pathKind: 'file',
-        filters: [{ name: 'SER / stills', extensions: ['ser', 'png', 'tif', 'jpg'] }] },
+        filters: INPUT_FILTERS },
       { key: 'start_frame', type: 'int', optional: true, default: 0, min: 0, help: 'inclusive' },
       { key: 'frame_step', type: 'int', optional: true, default: 1, min: 1 },
       { key: 'end_frame', type: 'int', optional: true, default: 300, min: 1,

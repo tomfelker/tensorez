@@ -33,9 +33,26 @@ pip install -r requirements.txt
 ```
 
 Notes:
-* No NVIDIA GPU? Skip the big CUDA download: `pip install -e .[deconv] --extra-index-url https://download.pytorch.org/whl/cpu` (from `cli/`).
-* Don't need deconvolution? A minimal install is just `pip install -e .` (from `cli/`).
+* No NVIDIA GPU? Skip the big CUDA download: `pip install -e .[deconv,video] --extra-index-url https://download.pytorch.org/whl/cpu` (from `cli/`).
+* Don't need deconvolution or video? A minimal install is just `pip install -e .` (from `cli/`).
 * Check that the GPU is visible: `python -c "import torch; print(torch.cuda.is_available())"`
+
+FFmpeg (only for MP4/AVI input)
+--
+SER files, PNGs and TIFFs work out of the box. Reading compressed video needs FFmpeg as well, because torchcodec loads the system's FFmpeg libraries rather than bundling them. Any major version from 4 to 8 works.
+
+```powershell
+winget install BtbN.FFmpeg.LGPL.Shared.7.1
+```
+
+```bash
+sudo apt install ffmpeg     # Debian / Ubuntu
+brew install ffmpeg         # macOS
+```
+
+**It has to be a *shared* build.** Most prebuilt Windows FFmpeg packages — including `Gyan.FFmpeg` and the `BtbN.FFmpeg.GPL` variants without `.Shared` — are static: you get a working `ffmpeg.exe` and no DLLs at all, so video decoding still fails and it looks like TensoRez's fault. The `.Shared` packages above are the ones that work. (LGPL is fine and is the lighter licensing choice; decoding H.264 and HEVC doesn't need the GPL build.)
+
+TensoRez finds the libraries next to whichever `ffmpeg` is on PATH. If yours lives elsewhere, set `TENSOREZ_FFMPEG_DIR` to the directory holding them. Without all this, video files fail with a message saying so and every other format keeps working.
 
 GUI
 --
@@ -69,7 +86,9 @@ npm test
 
 Using
 ==
-The CLI takes a recipe `.toml` describing your input files and processing options (see `cli/examples/` for real ones, and DESIGN_CONTRACT.md for every key):
+The CLI takes a recipe `.toml` describing your input files and processing options (see `cli/examples/` for real ones, and DESIGN_CONTRACT.md for every key).
+
+Inputs can be SER files, still images (PNG/TIFF/JPEG), or videos (MP4/AVI/MOV/MKV, needing the FFmpeg install above) — globs across several files are treated as one long sequence. SER is the format worth capturing in: it holds the raw sensor data, so the Bayer mosaic survives and `[lights] debayer` still has a choice to make. A video has already been demosaiced and lossily compressed by the time you get it, so it's read as ordinary 8-bit sRGB and the debayer setting doesn't apply.
 
 Keep the recipe with the capture files it processes — that's the intended workflow, and it makes everything else fall out:
 

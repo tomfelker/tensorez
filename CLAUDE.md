@@ -26,6 +26,11 @@ Venv lives at repo root: `.venv` (Python 3.14, torch+cu130). Install:
 inside resolves against the shell cwd). The GUI finds Python via
 `TENSOREZ_PYTHON` env var, falling back to `python` on PATH.
 
+MP4/AVI input needs FFmpeg's **shared** libraries as well, installed here with
+`winget install BtbN.FFmpeg.LGPL.Shared.7.1` (which puts the real bin directory
+on the user PATH, so a fresh shell picks it up). `TENSOREZ_FFMPEG_DIR`
+overrides the search when a shell's PATH is stale.
+
 ## Tests
 
 - CLI: `cd cli && pytest` (~80 s; needs `pip install -e .[dev]`). conftest
@@ -39,6 +44,9 @@ inside resolves against the shell cwd). The GUI finds Python via
   output lands in `cli/examples/{<recipe stem>,tensorez_runs,tensorez_cache}/`,
   all gitignored. They fail with a "run the CLI first" message otherwise.
 - GUI tests rewrite `gui/screenshots/` on every run — untracked on purpose.
+- `test_video.py` generates its fixtures by piping raw frames through the
+  `ffmpeg` binary, so it skips (with the reason) when FFmpeg or torchcodec is
+  missing. Three of its tests cover the degraded path and always run.
 
 ## Gotchas (each of these has bitten before)
 
@@ -54,6 +62,18 @@ inside resolves against the shell cwd). The GUI finds Python via
 - The `local_lucky` stage is never fully cached (pass 2 always runs); `mfbd` is
   never cached at all. Don't "fix" that.
 - Event-stream consumers must ignore unknown event types and fields.
+- **Video needs a *shared* FFmpeg, and PATH is not enough.** torchcodec loads
+  the system FFmpeg (majors 4–8) instead of bundling it. Static builds — which
+  is most Windows packages, `Gyan.FFmpeg` included — ship `ffmpeg.exe` and no
+  DLLs, so they look installed and aren't. And since Python 3.8 the loader
+  doesn't search PATH for an extension module's dependencies, so having ffmpeg
+  on PATH still fails: `video.py` must call `os.add_dll_directory` on the
+  library directory *before* importing torchcodec. Symptom of getting this
+  wrong is a bare `Could not load this library: libtorchcodec_core4.dll`.
+- **Don't ask torchcodec for float32 frames.** Its float conversion normalizes
+  by ~256, not 255 (level 160 → 0.62501, white never reaching 1.0). `video.py`
+  decodes uint8 and divides by 255 itself so a video frame matches a still of
+  the same value exactly. Verified in `test_lossless_video_decodes_exactly`.
 - **Recipe paths resolve against the cwd**, not the recipe's directory (the
   GUI spawns the CLI with cwd = the recipe's folder). The recipe file names
   everything: there is no `[recipe]` section at all, and products default to

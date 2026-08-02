@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 CLI_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +25,78 @@ TRUTH_NPY = EXAMPLES / "truth.npy"
 # synthetic_planet.ser is ~24 MB and deliberately not in git; generate it once.
 if not SYNTHETIC_SER.exists():
     subprocess.run([sys.executable, str(EXAMPLES / "gen_synthetic.py")], check=True)
+
+
+# -- video fixtures ---------------------------------------------------------
+# Video support is optional (see tensorez/video.py): it needs torchcodec plus a
+# *shared* FFmpeg build.  The video tests skip with the real reason rather than
+# fail when either is missing, since that is a supported configuration.
+
+from tensorez import video  # noqa: E402  (needs CLI_ROOT on sys.path first)
+
+
+def ffmpeg_exe() -> str | None:
+    """The ffmpeg binary, used only to generate test fixtures."""
+    directory = video.ffmpeg_dir()
+    if directory is not None:
+        for name in ("ffmpeg.exe", "ffmpeg"):
+            candidate = directory / name
+            if candidate.exists():
+                return str(candidate)
+    return shutil.which("ffmpeg")
+
+
+def _video_support() -> tuple[bool, str]:
+    if ffmpeg_exe() is None:
+        return False, "no ffmpeg binary available to generate test videos"
+    try:
+        video._video_decoder_class()
+    except video.VideoSupportError as e:
+        return False, str(e).splitlines()[0]
+    return True, ""
+
+
+VIDEO_OK, VIDEO_SKIP_REASON = _video_support()
+requires_video = pytest.mark.skipif(not VIDEO_OK, reason=VIDEO_SKIP_REASON)
+
+
+def marker_frames(count: int = 24, height: int = 32) -> np.ndarray:
+    """(N, H, W, 3) uint8 frames that identify themselves two ways.
+
+    Frame i has a flat background of ``i * 8`` and a white bar at column
+    ``2 * i``, so a decoder handing back a neighbouring frame -- or the
+    preceding keyframe, which is the classic seeking bug -- is caught by
+    either the level or the bar position.
+    """
+    width = 2 * count + 4
+    frames = np.zeros((count, height, width, 3), np.uint8)
+    for i in range(count):
+        frames[i, :, :, :] = i * 8
+        frames[i, :, 2 * i : 2 * i + 2, :] = 255
+    return frames
+
+
+def write_video(path: Path, frames: np.ndarray, codec: str = "rawvideo",
+                pix_fmt: str = "rgb24", fps: int = 25) -> Path:
+    """Encode (N, H, W, 3) uint8 frames with ffmpeg.
+
+    ``rawvideo``/``rgb24`` is lossless and all-intra, so tests can assert exact
+    pixels; ``mpeg4`` exercises the inter-coded path where a frame index has to
+    be resolved by decoding forward from a keyframe.
+    """
+    _, height, width, _ = frames.shape
+    exe = ffmpeg_exe()
+    assert exe is not None, "write_video requires ffmpeg"
+    quality = [] if codec == "rawvideo" else ["-qscale:v", "2"]
+    subprocess.run(
+        [exe, "-y", "-loglevel", "error",
+         "-f", "rawvideo", "-pix_fmt", "rgb24",
+         "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
+         "-c:v", codec, *quality, "-pix_fmt", pix_fmt, str(path)],
+        input=np.ascontiguousarray(frames, dtype=np.uint8).tobytes(),
+        check=True, capture_output=True,
+    )
+    return path
 
 
 def run_cli(args: list[str], cwd: Path, events: bool = True) -> subprocess.CompletedProcess[str]:

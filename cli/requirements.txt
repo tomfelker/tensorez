@@ -13,5 +13,8 @@
 --extra-index-url https://download.pytorch.org/whl/cu130
 
 # The package itself (editable), plus the [deconv] extra for the optional
-# multi-frame blind deconvolution stage (torchmfbd).
--e .[deconv]
+# multi-frame blind deconvolution stage (torchmfbd) and [video] for MP4/AVI
+# input.  [video] also needs FFmpeg's shared libraries installed separately —
+# see README.md; without them video inputs fail with an explanatory error and
+# everything else still works.
+-e .[deconv,video]
