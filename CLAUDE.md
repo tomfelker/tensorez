@@ -62,6 +62,11 @@ overrides the search when a shell's PATH is stale.
 - The `local_lucky` stage is never fully cached (pass 2 always runs); `mfbd` is
   never cached at all. Don't "fix" that.
 - Event-stream consumers must ignore unknown event types and fields.
+- **Most recipe-form commits deliberately skip the re-render** (rebuilding a
+  control mid-keystroke steals focus), so anything derived from field values —
+  the off-default marks and revert buttons — has to be maintained on the live
+  DOM by `refreshDefaultMarkers()`, not baked in when a row is built. Computing
+  it in `renderField` looks right and silently never updates.
 - **Video needs a *shared* FFmpeg, and PATH is not enough.** torchcodec loads
   the system FFmpeg (majors 4–8) instead of bundling it. Static builds — which
   is most Windows packages, `Gyan.FFmpeg` included — ship `ffmpeg.exe` and no

@@ -10,7 +10,10 @@
 // recipe, so reopening the app returns you to what you were working on.
 
 import { parse as parseToml, stringify as stringifyToml } from '../vendor/index.js';
-import { SCHEMA, defaultRecipe, validateRecipe, hydrate } from './schema.js';
+import {
+  SCHEMA, defaultRecipe, validateRecipe, hydrate,
+  isFieldAtDefault, resetFieldToDefault, modifiedFields, describeDefault,
+} from './schema.js';
 import { loadSettings, updateSettings } from './settings.js';
 
 const SQRT2 = Math.SQRT2;
@@ -103,6 +106,8 @@ export async function initRecipe(root) {
       // silently orphan later edits.
       state = canonicalize(state);
       renderForm();
+    } else {
+      refreshDefaultMarkers();
     }
     syncTomlFromState();
   }
@@ -112,6 +117,81 @@ export async function initRecipe(root) {
   function renderForm() {
     formEl.textContent = '';
     for (const sec of SCHEMA) formEl.appendChild(renderSection(sec));
+    refreshDefaultMarkers();
+  }
+
+  // ---------- off-default marking ----------
+  // Applied after rendering AND after every in-place edit, because most commits
+  // deliberately skip the re-render (rebuilding controls mid-keystroke would
+  // steal focus). So these marks are maintained on the live DOM instead of
+  // being baked in when a row is built.
+
+  function makeRevertButton(sec, f) {
+    const revert = document.createElement('button');
+    revert.className = 'small revert-btn';
+    revert.type = 'button';
+    revert.textContent = '↺';
+    revert.title = `Revert to default (${describeDefault(f)})`;
+    revert.setAttribute('aria-label', `Revert ${f.key} to its default`);
+    revert.addEventListener('click', () => {
+      const secState = state[sec.section];  // looked up now: a re-render replaces it
+      if (!secState) return;
+      resetFieldToDefault(f, secState);
+      stateChanged({ rerender: true });
+    });
+    return revert;
+  }
+
+  function makeSectionReset(sec) {
+    const reset = document.createElement('button');
+    reset.className = 'small reset-section';
+    reset.type = 'button';
+    reset.addEventListener('click', () => {
+      const secState = state[sec.section];
+      if (!secState) return;
+      for (const f of modifiedFields(sec, secState)) resetFieldToDefault(f, secState);
+      stateChanged({ rerender: true });
+    });
+    return reset;
+  }
+
+  function refreshDefaultMarkers() {
+    for (const sec of SCHEMA) {
+      const card = formEl.querySelector(`.section-card[data-section="${sec.section}"]`);
+      if (!card) continue;
+      // A disabled optional section renders detached defaults, so it is scored
+      // against the real state and correctly reports nothing.
+      const secState = state[sec.section];
+
+      for (const f of sec.fields) {
+        if (f.hidden) continue; // a composite control reports for these
+        const row = card.querySelector(`[data-field="${sec.section}.${f.key}"]`);
+        if (!row) continue;
+        const off = !!secState && !isFieldAtDefault(f, secState);
+        row.classList.toggle('field-modified', off); // semantic hook; no styling
+        const button = row.querySelector('.revert-btn');
+        // third grid track, past the control — a reserved column of its own
+        if (off && !button) row.appendChild(makeRevertButton(sec, f));
+        else if (!off && button) button.remove();
+      }
+
+      const changed = modifiedFields(sec, secState);
+      card.classList.toggle('section-modified', changed.length > 0);
+      let badge = card.querySelector('.reset-section');
+      if (!changed.length) {
+        badge?.remove();
+        continue;
+      }
+      if (!badge) {
+        badge = makeSectionReset(sec);
+        const head = card.querySelector('.section-head');
+        // ahead of an optional section's enable checkbox, which sits hard right
+        head.insertBefore(badge, head.querySelector('label'));
+      }
+      badge.textContent = `↺ ${changed.length} changed`;
+      badge.title = 'Revert to defaults: ' +
+        changed.map((f) => f.labelText ?? f.key).join(', ');
+    }
   }
 
   function renderSection(sec) {
@@ -164,6 +244,7 @@ export async function initRecipe(root) {
       if (f.hidden) continue; // rendered by a composite control (e.g. pixelscale)
       fields.appendChild(renderField(sec, f, secState));
     }
+
     card.appendChild(fields);
     return card;
   }
@@ -435,7 +516,7 @@ export async function initRecipe(root) {
       }
     }
     row.appendChild(ctl);
-    return row;
+    return row;  // off-default marks are applied by refreshDefaultMarkers()
   }
 
   function makeStepper(f, secState) {

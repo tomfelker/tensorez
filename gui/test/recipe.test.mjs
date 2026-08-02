@@ -200,6 +200,67 @@ export default async function run(browser) {
   await page.click('#rc-new');
   await page.evaluate(() => document.getElementById('views').scrollTo(0, 0));
 
+  // ---- off-default values are marked, and revertible ----
+  // A fresh recipe is all defaults by construction, so nothing may be marked.
+  assert.equal(await page.locator('#rc-form .field-modified').count(), 0,
+    'a new recipe has nothing marked as changed');
+  assert.equal(await page.locator('#rc-form .reset-section').count(), 0);
+
+  // a plain field: gutter mark, revert control, and a section badge counting it
+  const dbgRow = page.locator('[data-field="output.debug_frames"]');
+  await dbgRow.locator('button[title=increment]').click();
+  assert.ok(await dbgRow.locator('.revert-btn').isVisible(), 'revert offered once changed');
+  assert.match(await dbgRow.locator('.revert-btn').getAttribute('title'), /\(10\)/,
+    'tooltip names the default it would restore');
+  assert.equal(await page.locator('[data-section="output"] .reset-section').textContent(),
+    '↺ 1 changed');
+  await dbgRow.locator('.revert-btn').click();
+  assert.equal(await dbgRow.locator('.stepper input').inputValue(), '10');
+  assert.equal(await page.locator('[data-field="output.debug_frames"].field-modified').count(), 0,
+    'reverting clears the mark');
+  assert.equal(await page.locator('[data-section="output"] .reset-section').count(), 0);
+
+  // an optional key's default is ABSENCE, so setting it at all is a change and
+  // reverting takes it back out of the TOML rather than to some value
+  const endRow = page.locator('[data-field="lights.end_frame"]');
+  await endRow.locator('.opt-toggle input').check();
+  assert.ok(await endRow.locator('.revert-btn').isVisible(), 'a set optional key is a change');
+  assert.match(await endRow.locator('.revert-btn').getAttribute('title'), /unset/);
+  assert.match(await toml.inputValue(), /end_frame = /);
+  await endRow.locator('.revert-btn').click();
+  assert.doesNotMatch(await toml.inputValue(), /end_frame = /, 'reverted to absent');
+  assert.equal(await endRow.locator('.opt-toggle input').isChecked(), false);
+
+  // the section badge reverts every changed field in its card at once
+  await page.locator('[data-field="lights.debayer"] select').selectOption('none');
+  const startInput = page.locator('[data-field="lights.start_frame"] .stepper input');
+  await startInput.fill('12');
+  await startInput.press('Tab');
+  assert.equal(await page.locator('[data-section="lights"] .reset-section').textContent(),
+    '↺ 2 changed');
+  await page.locator('[data-section="lights"]').scrollIntoViewIfNeeded();
+  await shoot(page, '14-recipe-modified-fields.png');
+  await page.click('[data-section="lights"] .reset-section');
+  assert.equal(await page.locator('[data-section="lights"] .field-modified').count(), 0);
+  assert.match(await toml.inputValue(), /debayer = "bilinear"/);
+  assert.match(await toml.inputValue(), /start_frame = 0/);
+
+  // the either/or pixel scale: camera mode is a departure in itself, because it
+  // serializes different keys, and reverting restores the direct representation
+  await page.check('input[data-section-toggle=mfbd]');
+  const scaleRow = page.locator('[data-field="mfbd.pixel_scale_arcsec"]');
+  assert.equal(await scaleRow.locator('.revert-btn').count(), 0,
+    'a freshly enabled section is at its defaults');
+  await scaleRow.locator('select[data-role=ps-mode]').selectOption('camera');
+  assert.ok(await scaleRow.locator('.revert-btn').isVisible(), 'camera mode is a change');
+  assert.match(await toml.inputValue(), /pixel_size_um/);
+  await scaleRow.locator('.revert-btn').click();
+  assert.doesNotMatch(await toml.inputValue(), /pixel_size_um/, 'camera keys removed');
+  assert.match(await toml.inputValue(), /pixel_scale_arcsec = 0\.25/);
+  assert.equal(await scaleRow.locator('.revert-btn').count(), 0);
+
+  await page.click('#rc-new');
+
   checkNoPageErrors(page);
   await page.close();
 }

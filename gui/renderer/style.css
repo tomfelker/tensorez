@@ -196,14 +196,38 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 
 .fields { display: flex; flex-direction: column; gap: 10px; }
 
+/* Third track is the revert gutter: always reserved, usually empty, so a button
+   appearing never shifts the controls beside it. The button showing up is the
+   whole indication that a value is off-default — no extra colouring needed. */
 .field-row {
   display: grid;
-  grid-template-columns: 190px 1fr;
+  grid-template-columns: 190px 1fr 28px;
   align-items: center;
   gap: 12px;
   min-height: 30px;
 }
 .field-row.hidden-field { display: none; }
+
+.revert-btn {
+  width: 28px;
+  padding: 3px 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 6px;
+  color: var(--text-dim);
+}
+.revert-btn:hover { color: var(--accent); border-color: var(--accent); }
+.reset-section {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.reset-section:hover { color: var(--accent); border-color: var(--accent); }
+/* the badge takes over pushing right, so the enable checkbox stays beside it
+   instead of the two splitting the free space between them */
+.section-head .reset-section ~ label { margin-left: 0; }
 .field-label { color: var(--text-dim); font-size: 13px; }
 .field-label .fname { color: var(--text); }
 .req-star {

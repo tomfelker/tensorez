@@ -285,6 +285,62 @@ export function hydrate(obj) {
   return out;
 }
 
+// ---- default tracking -----------------------------------------------------
+// "At default" means this key would contribute to the recipe exactly what a
+// fresh one contributes. That is the schema default for a plain field, ABSENCE
+// for an optional one, and — for the either/or pixel scale — the direct
+// representation rather than camera mode. The form marks anything else and
+// offers to put it back.
+
+export function sameValue(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b)
+      && a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+  }
+  return a === b;
+}
+
+export function isFieldAtDefault(f, secState) {
+  if (!secState) return true;
+  if (f.type === 'pixelscale') {
+    // camera mode is a departure in itself: it serializes a different set of
+    // keys, so there is no value of pixel_scale_arcsec that makes it default
+    return !f.skipIf?.(secState) && sameValue(secState[f.key], f.default);
+  }
+  // an optional key defaults to absent — unless its mode makes it a companion
+  // that a fresh recipe would carry (presentIf), where the value is what counts
+  if (f.optional && !f.presentIf?.(secState)) return !(f.key in secState);
+  if (!(f.key in secState)) return true; // absent: the CLI applies the default
+  return sameValue(secState[f.key], f.default);
+}
+
+export function resetFieldToDefault(f, secState) {
+  if (f.type === 'pixelscale') {
+    for (const key of Object.keys(f.camera || {})) delete secState[key];
+    secState[f.key] = structuredClone(f.default);
+    return;
+  }
+  if (f.optional && !f.presentIf?.(secState)) {
+    delete secState[f.key];
+    return;
+  }
+  secState[f.key] = structuredClone(f.default);
+}
+
+// Visible fields of a section that differ from a fresh recipe. Hidden fields
+// are excluded: a composite control owns them and reports on their behalf.
+export function modifiedFields(sec, secState) {
+  if (!secState) return [];
+  return sec.fields.filter((f) => !f.hidden && !isFieldAtDefault(f, secState));
+}
+
+// How to describe a field's default in a tooltip.
+export function describeDefault(f) {
+  if (f.type === 'pixelscale') return `${f.default} arcsec/px, entered directly`;
+  if (f.optional && !f.presentIf) return 'unset';
+  return Array.isArray(f.default) ? f.default.join(', ') : String(f.default);
+}
+
 // Validate a parsed recipe object against the schema. Returns a list of
 // problem strings; empty list = valid. Unknown keys are flagged because the
 // contract makes them a hard error in the CLI. Missing keys are NOT flagged —
