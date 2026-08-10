@@ -26,6 +26,17 @@ TRUTH_NPY = EXAMPLES / "truth.npy"
 if not SYNTHETIC_SER.exists():
     subprocess.run([sys.executable, str(EXAMPLES / "gen_synthetic.py")], check=True)
 
+# speckle_planet.ser: same planet under phase-distorting seeing (what
+# lucky_fourier needs to show a gain).  Also gitignored; generated alone so an
+# existing synthetic_planet.ser keeps its mtime (it identifies cached stages).
+SPECKLE_SER = EXAMPLES / "speckle_planet.ser"
+if not SPECKLE_SER.exists():
+    if str(EXAMPLES) not in sys.path:
+        sys.path.insert(0, str(EXAMPLES))
+    import gen_synthetic
+
+    gen_synthetic.write_speckle_planet()
+
 
 # -- video fixtures ---------------------------------------------------------
 # Video support is optional (see tensorez/video.py): it needs torchcodec plus a

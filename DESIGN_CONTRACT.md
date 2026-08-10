@@ -20,11 +20,12 @@ The pipeline is **fixed and opinionated**: stages run in a hard-coded order; the
 recipe only parameterizes them and toggles optional ones. It is not a DAG language.
 
 Stage order: `lights` → `darks` (calibration) → `align` → `lucky_scoring` →
-`local_lucky` → `lucky_stack` → `mfbd` → `output`.
+`local_lucky` → `lucky_fourier` → `lucky_stack` → `mfbd` → `output`.
 
-After alignment there are three independent, individually optional **producers**,
+After alignment there are four independent, individually optional **producers**,
 each yielding one or more single-image products: `local_lucky` (per-pixel lucky
-stacking), `lucky_stack` (classic whole-frame lucky stacks), and `mfbd`
+stacking), `lucky_fourier` (per-frequency lucky stacking), `lucky_stack`
+(classic whole-frame lucky stacks), and `mfbd`
 (multi-frame blind deconvolution). At least one must be enabled. `lucky_scoring`
 computes one cached scalar score per frame and is required by `lucky_stack` and
 by `mfbd` with `frames = "lucky_top"`.
@@ -101,6 +102,24 @@ channel_crosstalk = 0.0                # 0 = per-channel luck, 1 = min across ch
 stdevs_above_mean = 2.5                # sigmoid gate center, in σ of per-pixel luck
 steepness = 3.0                        # sigmoid gate sharpness
 # Product: local_lucky.{npy,tif,png}
+
+[lucky_fourier]              # optional; per-frequency lucky stacking in Fourier space
+                             # (Fourier amplitude selection, Garrel et al. 2012).
+                             # Pass 1 (cached, parameter-free): mean/stdev of |FFT| per
+                             # (channel, u, v) over all frames. Pass 2: each frame's
+                             # magnitude z-scores are sigmoid-gated and the weighted
+                             # *complex* spectrum is averaged — each frequency is carried
+                             # by the frames that transmitted it best.
+subpixel_align = true        # rotate each frame's phases by the ramp that puts its
+                             # toroidal centroid (read from the two first-harmonic
+                             # bins) on the center pixel, index (size-1)//2 — exact
+                             # sub-pixel alignment that never leaves frequency space.
+per_channel = false          # center each channel independently (sub-pixel
+                             # atmospheric dispersion correction)
+channel_crosstalk = 0.0      # 0 = per-channel luck, 1 = min across channels
+stdevs_above_mean = 2.5      # sigmoid gate center, in σ of per-(u,v) |FFT|
+steepness = 3.0              # sigmoid gate sharpness
+# Product: lucky_fourier.{npy,tif,png}
 
 [mfbd]                       # optional; multi-frame blind deconvolution (torchmfbd)
 method = "torchmfbd"         # only value in v0
@@ -263,8 +282,8 @@ tensorez dev branch, with file identity added to the key.
   Consumers must ignore unknown fields on any event (confirmed both sides).
 - `tensorez validate` emits one `validate_result` event:
   `{recipe, frame_count, stages: [{stage, cached}]}` over the cacheable stages —
-  `darks`, `align`, `lucky_scoring`, `local_lucky_stats` — each present only when
-  the corresponding recipe section is enabled.
+  `darks`, `align`, `lucky_scoring`, `local_lucky_stats`, `lucky_fourier_stats` —
+  each present only when the corresponding recipe section is enabled.
 - Product `.npy` files on disk are **HWC** float32 (NCHW applies to in-memory
   torch tensors only).
 - Artifact `name` is not a unique key (the same name may appear with multiple kinds);
@@ -322,6 +341,21 @@ tensorez dev branch, with file identity added to the key.
   pixels: alignment (mean-relative) and the luckiness/scoring bands (DC-free)
   are unaffected, `.npy` preserves them, and `.tif`/`.png` clip them to black.
   The `align` stage logs what fraction of frame 0 went negative.
+- **`[lucky_fourier]` producer (additive).** Per-frequency lucky stacking —
+  Fourier amplitude selection (Garrel, Guyon & Baudoz 2012) with
+  `local_lucky`'s sigmoid gate. New optional section (keys above), fourth
+  producer in the at-least-one rule, product `lucky_fourier.{npy,tif,png}`.
+  Like `local_lucky`, its `stage_start` carries `pass1_cached` and the stage
+  is never fully `cached` (pass 2 always runs); its pass-1 statistics are
+  parameter-free, keyed on alignment alone, so *any* gate tweak reruns only
+  pass 2. `validate_result` gained a `lucky_fourier_stats` entry when the
+  section is enabled. `subpixel_align` (default true) and its `per_channel`
+  companion (default false) are likewise pure pass-2 knobs: spectrum
+  magnitudes are shift-invariant, so toggling them hits the same stats
+  cache. Debug artifacts: `unweighted_average`, `spectrum_mean`,
+  `spectrum_stdev`, `uv_total_weight`, and per-frame `uv_weight_*` previews
+  (spectrum-domain images are log-scaled and vertically fftshifted
+  half-planes).
 - **Video inputs (additive).** `[lights] paths` and `[darks] paths` accept
   MP4/AVI/MOV/MKV alongside `.ser` and stills, decoded by torchcodec with
   frame-accurate indexing (`seek_mode="exact"`, so frame *i* is frame *i* even

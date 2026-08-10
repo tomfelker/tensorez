@@ -1,9 +1,10 @@
 """The fixed pipeline:
 
-    lights -> darks -> align -> lucky_scoring? -> {local_lucky?, lucky_stack?, mfbd?} -> output
+    lights -> darks -> align -> lucky_scoring?
+        -> {local_lucky?, lucky_fourier?, lucky_stack?, mfbd?} -> output
 
 Streaming design: no stage ever holds more than a handful of frames in
-memory.  After calibration and alignment there are three independent
+memory.  After calibration and alignment there are four independent
 producers, each optional, each yielding a single image:
 
 * ``local_lucky`` — per-pixel lucky stacking, the two-pass scheme from the
@@ -21,6 +22,13 @@ producers, each optional, each yielding a single image:
   Pass-1 statistics (and the aligned unweighted average, which the luckiness
   metric needs as its "known" reference) are cached, so tweaking only the
   selection knobs reruns pass 2 alone.
+
+* ``lucky_fourier`` — per-frequency lucky stacking (Fourier amplitude
+  selection): the same two-pass scheme, but the Welford statistics live on
+  the per-(u, v) spectrum magnitude and pass 2 accumulates the sigmoid-gated
+  *complex* spectrum, so each frequency is carried by the frames that
+  transmitted it best.  Pass 1 is parameter-free and cached; gate tweaks
+  rerun pass 2 alone.
 
 * ``lucky_stack`` — classic whole-frame lucky imaging: plain averages of the
   best ceil(fraction * N) frames, one output per requested fraction.
@@ -69,6 +77,13 @@ from .bayer import bayer_mask
 from .cache import CacheEntry
 from .events import EventEmitter
 from .luckiness import FrequencyBands, FrequencyBandsParams
+from .lucky_fourier import (
+    LuckyFourierParams,
+    centroid_align_ramp,
+    gate_weight,
+    spectrum,
+    spectrum_preview,
+)
 from .observation import AlignParams, Observation
 from .recipe import Recipe
 from .scoring import FrameScorer, ScoringParams
@@ -180,6 +195,16 @@ class Pipeline:
             + "stats: mean, stdev\n"
         )
 
+    def _lucky_fourier_stats_key(self, align_entry: CacheEntry) -> str:
+        # Pass 1 is parameter-free (per-uv magnitude statistics of the aligned
+        # frames), so the gate knobs deliberately stay out of the key: any
+        # gate tweak reruns pass 2 against the same cached statistics.
+        return (
+            "stage: lucky_fourier_stats\n"
+            f"align_key: {align_entry.key_hash}\n"
+            "stats: spectrum magnitude mean, stdev\n"
+        )
+
     def _align_params(self) -> AlignParams:
         a = self.recipe.align
         return AlignParams(
@@ -271,6 +296,11 @@ class Pipeline:
                 self.cache_dir, "local_lucky_stats", self._local_lucky_stats_key(align_entry)
             )
             stages.append({"stage": "local_lucky_stats", "cached": stats_entry.complete})
+        if self.recipe.lucky_fourier is not None:
+            fourier_entry = CacheEntry(
+                self.cache_dir, "lucky_fourier_stats", self._lucky_fourier_stats_key(align_entry)
+            )
+            stages.append({"stage": "lucky_fourier_stats", "cached": fourier_entry.complete})
         return {
             "recipe": self.recipe.resolved_dict(),
             "name": self.recipe.name,
@@ -341,6 +371,9 @@ class Pipeline:
 
         if recipe.local_lucky is not None:
             self._run_local_lucky(obs, average_image, align_entry)
+
+        if recipe.lucky_fourier is not None:
+            self._run_lucky_fourier(obs, average_image, align_entry)
 
         if recipe.lucky_stack is not None:
             assert scores is not None  # recipe validation guarantees scoring
@@ -661,6 +694,116 @@ class Pipeline:
                 f"local_lucky: average effective frames per pixel: {avg_frames:.2f} of {total}"
             )
             self._publish_product("local_lucky", "local_lucky", result)
+        return result
+
+    # -- lucky fourier ------------------------------------------------------
+
+    def _run_lucky_fourier(
+        self, obs: Observation, average_image: torch.Tensor, align_entry: CacheEntry
+    ) -> torch.Tensor:
+        """Two-pass per-frequency lucky stacking (see lucky_fourier.py).
+
+        Pass 1 (cached, parameter-free): per-(channel, u, v) mean and stdev
+        of the spectrum magnitude over all frames.  Pass 2: sigmoid-gate each
+        frame's magnitude z-score and accumulate the weighted complex
+        spectrum, so the luckiest frames' phases carry each frequency.
+        """
+        recipe = self.recipe
+        cfg = recipe.lucky_fourier
+        assert cfg is not None
+        params = LuckyFourierParams(
+            stdevs_above_mean=cfg.stdevs_above_mean,
+            steepness=cfg.steepness,
+            channel_crosstalk=cfg.channel_crosstalk,
+        )
+        debug_frames = recipe.output.debug_frames
+        stats_entry = CacheEntry(
+            self.cache_dir, "lucky_fourier_stats", self._lucky_fourier_stats_key(align_entry)
+        )
+        pass1_cached = stats_entry.complete
+        total = len(obs)
+        h, w = average_image.shape[-2], average_image.shape[-1]
+
+        with self.stage("lucky_fourier", cached=False, pass1_cached=pass1_cached):
+            # The aligned unweighted average, for comparison against the
+            # product (same courtesy local_lucky extends).
+            self.example("lucky_fourier", "unweighted_average", average_image)
+            rel = "examples/lucky_fourier/unweighted_average.npy"
+            write_npy(self.run_dir / rel, average_image)
+            self.artifact("lucky_fourier", "unweighted_average", "array", rel)
+
+            if pass1_cached:
+                self.emitter.log("lucky_fourier: pass 1 statistics loaded from cache")
+                stats = stats_entry.load_npz("stats")
+                mag_mean = torch.from_numpy(stats["mean"])
+                mag_stdev = torch.from_numpy(stats["stdev"])
+            else:
+                welford = Welford()
+                for i in range(total):
+                    image, _ = obs.read_cooked(i)
+                    welford.update(spectrum(image).abs())
+                    self.emitter.progress("lucky_fourier", i + 1, total,
+                                          message="pass 1/2: spectrum statistics")
+                mag_mean, mag_stdev = welford.mean, welford.stdev
+                stats_entry.save_npz("stats", mean=mag_mean.numpy(), stdev=mag_stdev.numpy())
+                stats_entry.mark_complete()
+
+            self.example("lucky_fourier", "spectrum_mean",
+                         spectrum_preview(mag_mean), normalize=True)
+            self.example("lucky_fourier", "spectrum_stdev",
+                         spectrum_preview(mag_stdev), normalize=True)
+
+            # Pass 2: weighted complex accumulation.  Sub-pixel alignment
+            # happens here and only here: the integer CoM stage centered each
+            # frame to +/- half a pixel, and the ramp rotates the residual
+            # out of the phases before they are averaged.  (The magnitudes —
+            # and so the gate and the pass-1 cache — are shift-invariant.)
+            weighted_sum: torch.Tensor | None = None
+            total_weight: torch.Tensor | None = None
+            residual_px: list[float] = []
+            for i in range(total):
+                image, _ = obs.read_cooked(i)
+                spec = spectrum(image)
+                if cfg.subpixel_align:
+                    spec, delta = centroid_align_ramp(
+                        spec, image.shape[-2], image.shape[-1],
+                        per_channel=cfg.per_channel,
+                    )
+                    residual_px.append(float(delta.norm(dim=-1).mean()))
+                weight = gate_weight(spec.abs(), mag_mean, mag_stdev, params)
+                if i < debug_frames:
+                    self.example("lucky_fourier", f"uv_weight_{i:08d}",
+                                 torch.fft.fftshift(weight, dim=-2),
+                                 normalize=True, frame=i)
+                if weighted_sum is None:
+                    weighted_sum = torch.zeros_like(spec)
+                    total_weight = torch.zeros_like(weight)
+                weighted_sum += weight * spec
+                total_weight += weight
+                self.emitter.progress("lucky_fourier", i + 1, total,
+                                      message="pass 2/2: weighted spectrum")
+
+            assert weighted_sum is not None and total_weight is not None
+            # An extreme gate can underflow every weight at some (u, v) to
+            # exactly 0 — but then the weighted sum there is 0 too, so
+            # clamping the denominator yields a clean 0/tiny = 0.
+            tiny = torch.finfo(total_weight.dtype).tiny
+            result = torch.fft.irfft2(weighted_sum / total_weight.clamp(min=tiny), s=(h, w))
+
+            self.example("lucky_fourier", "uv_total_weight",
+                         torch.fft.fftshift(total_weight, dim=-2), normalize=True)
+            if residual_px:
+                self.emitter.log(
+                    f"lucky_fourier: subpixel_align corrected a mean residual "
+                    f"shift of {np.mean(residual_px):.3f} px "
+                    f"(max {np.max(residual_px):.3f})"
+                )
+            avg_frames = float(total_weight.mean())
+            self.emitter.log(
+                f"lucky_fourier: average effective frames per frequency: "
+                f"{avg_frames:.2f} of {total}"
+            )
+            self._publish_product("lucky_fourier", "lucky_fourier", result)
         return result
 
     # -- lucky stack --------------------------------------------------------

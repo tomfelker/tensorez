@@ -1,0 +1,40 @@
+# Real-data run of the lucky_fourier producer on the Jupiter PNGs, with the
+# plain best-half stack alongside for comparison.
+#
+# Run it from this directory -- paths resolve against the working directory:
+#     cd cli/examples && python -m tensorez run jupiter_fourier.toml
+
+[lights]
+paths = ["../../data/jupiter_mvi_6906/????????.png"]
+
+[align]
+center_of_mass = true
+crop = [400, 400]
+
+[lucky_scoring]
+metric = "fourier_bandpass"
+min_wavelength_pixels = 5.0
+max_wavelength_pixels = 50.0
+
+[lucky_stack]
+top_fractions = [0.5]
+
+# Per-frequency lucky stacking: each (u, v) cell of the result's spectrum is
+# the complex average over the frames whose FFT magnitude there was unusually
+# high -- the moments the atmosphere transmitted that frequency cleanly.
+# Pass 1 (magnitude statistics) is cached and parameter-free, so retuning the
+# gate reruns only pass 2.  A higher gate digs out more detail but keeps so
+# few frames per frequency that the noise floor mottles the sky; 1.0 is a
+# reasonable balance for this 100-frame capture.
+#
+# subpixel_align (default true) also removes each frame's sub-pixel centering
+# residual in frequency space; per_channel = true centers each color channel
+# independently, which takes out this capture's obvious atmospheric
+# dispersion along with it.
+[lucky_fourier]
+per_channel = true
+stdevs_above_mean = 1.0
+steepness = 3.0
+
+[output]
+debug_frames = 5

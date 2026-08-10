@@ -113,6 +113,27 @@ class LocalLuckyConfig:
 
 
 @dataclass(frozen=True)
+class LuckyFourierConfig:
+    """Per-frequency lucky stacking: Fourier amplitude selection (Garrel,
+    Guyon & Baudoz 2012) with local_lucky's sigmoid gate.  Each (u, v) cell
+    of the output spectrum is the complex average of that cell over the
+    frames where its magnitude was unusually high.
+
+    ``subpixel_align`` additionally rotates each frame's phases by the ramp
+    that puts its toroidal centroid on the center pixel — exact sub-pixel
+    alignment that never leaves frequency space (alignment residuals are
+    phase errors, and this is the phase-averaging stage).  ``per_channel``
+    centers each channel independently (sub-pixel atmospheric dispersion
+    correction)."""
+
+    subpixel_align: bool = True
+    per_channel: bool = False
+    channel_crosstalk: float = 0.0
+    stdevs_above_mean: float = 2.5
+    steepness: float = 3.0
+
+
+@dataclass(frozen=True)
 class OutputConfig:
     """Where the products land.
 
@@ -185,6 +206,7 @@ class Recipe:
     lucky_stack: LuckyStackConfig | None
     mfbd: MfbdConfig | None
     local_lucky: LocalLuckyConfig | None
+    lucky_fourier: LuckyFourierConfig | None
     output: OutputConfig
     path: Path = field(compare=False, default=Path("."))
 
@@ -251,6 +273,15 @@ class Recipe:
                 "channel_crosstalk": ll.channel_crosstalk,
                 "stdevs_above_mean": ll.stdevs_above_mean,
                 "steepness": ll.steepness,
+            }
+        if self.lucky_fourier is not None:
+            lf = self.lucky_fourier
+            d["lucky_fourier"] = {
+                "subpixel_align": lf.subpixel_align,
+                "per_channel": lf.per_channel,
+                "channel_crosstalk": lf.channel_crosstalk,
+                "stdevs_above_mean": lf.stdevs_above_mean,
+                "steepness": lf.steepness,
             }
         if self.mfbd is not None:
             dv = self.mfbd
@@ -384,7 +415,7 @@ def load_recipe(path: str | Path) -> Recipe:
 
     known_sections = {
         "lights", "darks", "align",
-        "lucky_scoring", "lucky_stack", "mfbd", "local_lucky", "output",
+        "lucky_scoring", "lucky_stack", "mfbd", "local_lucky", "lucky_fourier", "output",
     }
     unknown = set(data) - known_sections
     if unknown:
@@ -514,6 +545,18 @@ def load_recipe(path: str | Path) -> Recipe:
             )
         s.check_no_unknown_keys()
 
+    lucky_fourier = None
+    if "lucky_fourier" in data:
+        s = _Section("lucky_fourier", data["lucky_fourier"])
+        lucky_fourier = LuckyFourierConfig(
+            subpixel_align=s.get("subpixel_align", bool, True),
+            per_channel=s.get("per_channel", bool, False),
+            channel_crosstalk=s.get_number("channel_crosstalk", 0.0, minimum=0.0, maximum=1.0),
+            stdevs_above_mean=s.get_number("stdevs_above_mean", 2.5),
+            steepness=s.get_number("steepness", 3.0, minimum=0.0),
+        )
+        s.check_no_unknown_keys()
+
     mfbd = None
     if "mfbd" in data:
         s = _Section("mfbd", data["mfbd"])
@@ -609,10 +652,10 @@ def load_recipe(path: str | Path) -> Recipe:
             raise RecipeError("[mfbd] central_obscuration_cm: must be smaller than diameter_cm")
         s.check_no_unknown_keys()
 
-    if local_lucky is None and lucky_stack is None and mfbd is None:
+    if local_lucky is None and lucky_fourier is None and lucky_stack is None and mfbd is None:
         raise RecipeError(
             "nothing produces an output: enable at least one of [local_lucky], "
-            "[lucky_stack], or [mfbd]"
+            "[lucky_fourier], [lucky_stack], or [mfbd]"
         )
 
     s = _Section("output", data.get("output", {}))
@@ -630,5 +673,6 @@ def load_recipe(path: str | Path) -> Recipe:
     return Recipe(
         lights=lights, darks=darks, align=align,
         lucky_scoring=lucky_scoring, lucky_stack=lucky_stack, mfbd=mfbd,
-        local_lucky=local_lucky, output=output, path=path.resolve(),
+        local_lucky=local_lucky, lucky_fourier=lucky_fourier, output=output,
+        path=path.resolve(),
     )

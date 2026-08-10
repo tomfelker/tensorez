@@ -79,6 +79,27 @@ def test_producer_branch_rules(tmp_path: Path) -> None:
     assert r.mfbd is not None and r.lucky_scoring is None
 
 
+def test_lucky_fourier_section(tmp_path: Path) -> None:
+    # a lone [lucky_fourier] is a valid producer, with defaults
+    r = _load(tmp_path, MINIMAL.replace("[local_lucky]", "[lucky_fourier]"))
+    assert r.local_lucky is None
+    assert r.lucky_fourier is not None
+    assert r.lucky_fourier.stdevs_above_mean == 2.5
+    assert r.lucky_fourier.steepness == 3.0
+    assert r.lucky_fourier.channel_crosstalk == 0.0
+    assert r.lucky_fourier.subpixel_align is True
+    assert r.lucky_fourier.per_channel is False
+    assert r.resolved_dict()["lucky_fourier"]["steepness"] == 3.0
+    r = _load(tmp_path, MINIMAL.replace("[local_lucky]", "[lucky_fourier]")
+              + "per_channel = true\n")
+    assert r.lucky_fourier.per_channel is True
+    assert r.resolved_dict()["lucky_fourier"]["per_channel"] is True
+    with pytest.raises(RecipeError, match=r"\[lucky_fourier\] unknown key 'top_fraction'"):
+        _load(tmp_path, MINIMAL + "\n[lucky_fourier]\ntop_fraction = 0.1\n")
+    with pytest.raises(RecipeError, match=r"\[lucky_fourier\] channel_crosstalk"):
+        _load(tmp_path, MINIMAL + "\n[lucky_fourier]\nchannel_crosstalk = 1.5\n")
+
+
 def test_wrong_types_are_errors(tmp_path: Path) -> None:
     with pytest.raises(RecipeError, match=r"\[lights\] frame_step"):
         _load(tmp_path, MINIMAL.replace('paths = ', 'frame_step = 1.5\npaths = '))

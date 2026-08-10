@@ -158,6 +158,31 @@ export const SCHEMA = [
     ],
   },
   {
+    section: 'lucky_fourier',
+    label: 'Lucky Fourier',
+    optionalSection: true,
+    help: 'Per-frequency lucky stacking (Fourier amplitude selection): each spatial ' +
+      'frequency of the result is the complex average over the frames where its FFT ' +
+      'magnitude was unusually high — the moments the atmosphere transmitted that ' +
+      'frequency cleanly. Produces lucky_fourier.{npy,tif,png}.',
+    fields: [
+      { key: 'subpixel_align', type: 'bool', default: true,
+        help: 'shift each frame (exactly, in frequency space) so its centroid lands ' +
+          'on the center pixel — removes the sub-pixel residual the integer ' +
+          'center-of-mass alignment cannot, which otherwise decoheres the phases ' +
+          'being averaged' },
+      { key: 'per_channel', type: 'bool', default: false,
+        help: 'center each channel independently — sub-pixel atmospheric dispersion ' +
+          'correction' },
+      { key: 'channel_crosstalk', type: 'float', default: 0.0, min: 0, max: 1, step: 0.05,
+        help: '0 = per-channel luck, 1 = min across channels' },
+      { key: 'stdevs_above_mean', type: 'float', default: 2.5, min: -5, max: 10, step: 0.1,
+        help: 'sigmoid gate center, in σ of per-frequency FFT magnitude' },
+      { key: 'steepness', type: 'float', default: 3.0, min: 0.1, max: 50, step: 0.1,
+        help: 'sigmoid gate sharpness' },
+    ],
+  },
+  {
     section: 'mfbd',
     label: 'MFBD',
     optionalSection: true,
@@ -367,9 +392,9 @@ export function validateRecipe(obj) {
     if (sec.validate) problems.push(...sec.validate(secVal));
   }
   // cross-section rules (the CLI enforces the same as hard errors)
-  if (!['local_lucky', 'lucky_stack', 'mfbd'].some((p) => p in obj)) {
+  if (!['local_lucky', 'lucky_fourier', 'lucky_stack', 'mfbd'].some((p) => p in obj)) {
     problems.push('nothing produces an output: enable at least one of local_lucky, ' +
-      'lucky_stack, or mfbd (CLI hard error)');
+      'lucky_fourier, lucky_stack, or mfbd (CLI hard error)');
   }
   if ('lucky_stack' in obj && !('lucky_scoring' in obj)) {
     problems.push('lucky_stack requires lucky_scoring (CLI hard error)');

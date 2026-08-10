@@ -34,7 +34,8 @@ overrides the search when a shell's PATH is stale.
 ## Tests
 
 - CLI: `cd cli && pytest` (~80 s; needs `pip install -e .[dev]`). conftest
-  auto-generates `examples/synthetic_planet.ser` (~24 MB, gitignored) on first run.
+  auto-generates `examples/synthetic_planet.ser` and `examples/speckle_planet.ser`
+  (~24 MB each, gitignored) on first run.
 - GUI: `cd gui && npm test`. Playwright/headless Chromium
   (`npx playwright install chromium` once). `pretest` auto-runs
   `scripts/gen-mock.mjs` which writes `gui/mockrun/` + mock event streams.
@@ -66,8 +67,12 @@ overrides the search when a shell's PATH is stale.
   The vibe-coding VM once left `/root/tensorez/...` everywhere.
 - Recipe parsing is strict: unknown keys are hard errors, and exactly one
   pixel-scale representation is allowed in `[mfbd]` (direct or camera keys).
-- The `local_lucky` stage is never fully cached (pass 2 always runs); `mfbd` is
-  never cached at all. Don't "fix" that.
+- The `local_lucky` and `lucky_fourier` stages are never fully cached (pass 2
+  always runs); `mfbd` is never cached at all. Don't "fix" that.
+- `lucky_fourier` only helps when seeing distorts Fourier *phases*. The
+  zero-phase gaussian blur in `synthetic_planet.ser` gives it nothing to
+  recover, so it (correctly) loses to the plain average there — its tests run
+  on `speckle_planet.ser` instead. Don't move them over.
 - Event-stream consumers must ignore unknown event types and fields.
 - **Most recipe-form commits deliberately skip the re-render** (rebuilding a
   control mid-keystroke steals focus), so anything derived from field values —
